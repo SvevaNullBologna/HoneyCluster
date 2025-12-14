@@ -3,6 +3,15 @@ import os
 import gzip
 import shutil
 
+from pathlib import Path
+
+def contains_file_type(folder: str, extension: str)-> int:
+    folder_path = Path(folder)
+    files = list(folder_path.glob(f"*{extension}"))
+    return len(files)
+
+
+
 def check_directory(path: str | None, creation: bool) -> bool:
     if not path:
         logging.error("Path cannot be empty")
