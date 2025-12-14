@@ -9,6 +9,7 @@ class ZenodoInterpreter:
             logging.error(f"Directory non valida: {self.zenodo_path}")
         else :
             logging.info("Zenodo Interpreter started.")
+            #if
 
 
 
