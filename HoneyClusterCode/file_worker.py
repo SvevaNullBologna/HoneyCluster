@@ -5,6 +5,21 @@ import shutil
 
 from pathlib import Path
 
+
+from typing import Callable, TextIO
+
+
+
+def add_row_to_file(filename: str, row: str):
+    with open(filename, "a", encoding="utf-8") as f:
+        f.write(row + "\n")
+
+
+def read_file(filename: str,function_on_file: Callable[[TextIO], None]):
+    with open(filename, "r", encoding="utf-8") as f:
+        function_on_file(f)
+
+
 def contains_file_type(folder: str, extension: str)-> int:
     folder_path = Path(folder)
     files = list(folder_path.glob(f"*{extension}"))
@@ -29,7 +44,7 @@ def check_directory(path: str | None, creation: bool) -> bool:
 
 
 
-def extract_gz_files(origin_path: str, destination_path: str | None) :
+def extract_gz_files(origin_path: str, destination_path: str | None, state_file: str = "extracted_gz.log") :
     """
     Estrae tutti i file .gz nella cartella specificata.
     """
@@ -38,21 +53,43 @@ def extract_gz_files(origin_path: str, destination_path: str | None) :
 
     if check_directory(origin_path, False) and check_directory(destination_path, True):
             logging.info(f"Extracting {origin_path} to {destination_path}")
+            extracted_file = "extracted_gz.txt"
             for filename in os.listdir(origin_path):
-                if filename.endswith(".gz"):
+                if filename.endswith(".gz") and not __already_extracted(extracted_file, filename):
                     src_path = os.path.join(origin_path, filename)
-
                     output_filename = filename[:-3]
                     dst_path = os.path.join(destination_path, output_filename)
-
                     logging.info(f"Decompressione: {src_path} -> {dst_path}")
-                try:
-                    with gzip.open(src_path, "rb") as f_in:
-                        with open(dst_path, "wb") as f_out:
-                            shutil.copyfileobj(f_in, f_out)
-                except (OSError, EOFError) as e:
-                    logging.error(f"Errore decompressione {filename}: {e}")
-                    continue
+                    try:
+                        with gzip.open(src_path, "rb") as f_in:
+                            with open(dst_path, "wb") as f_out:
+                                shutil.copyfileobj(f_in, f_out)
+                        __update_extracted(extracted_file, filename, 1)
+                    except (OSError, EOFError) as e:
+                        logging.error(f"Errore decompressione {filename}: {e}")
+                        __update_extracted(extracted_file, filename, 0)
+                        continue
+
+def __already_extracted(extracted_file: str, filename: str) -> bool:
+    with open(extracted_file, "r", encoding="utf-8") as f:
+        for line in f:
+            name, *_ = line.strip().split(" ", 1)
+            if name == filename:
+                return True
+    return False
+
+
+def __update_extracted(extracted_file: str, filename: str, result_of_extraction_code: int):
+    match result_of_extraction_code:
+        case 1:
+            __append_to_file(extracted_file, f"{filename} EXTRACTED")
+        case 0:
+            __append_to_file(extracted_file, f"{filename} ERROR")
+
+
+def __append_to_file(filename: str, row: str) -> None:
+    with open(filename, "a", encoding="utf-8") as f:
+        f.write(row + "\n")
 
 def main():
     logging.basicConfig(level=logging.INFO)
