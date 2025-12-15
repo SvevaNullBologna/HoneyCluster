@@ -44,40 +44,57 @@ def check_directory(path: str | None, creation: bool) -> bool:
 
 
 
-def extract_gz_files(origin_path: str, destination_path: str | None, state_file: str = "extracted_gz.log") :
+def extract_gz_files(origin_path: str, destination_path: str | None, extracted_gz_list_file: str | None = None) :
     """
     Estrae tutti i file .gz nella cartella specificata.
     """
-    if destination_path is None or destination_path == "":
+    if not destination_path :
         destination_path = origin_path
 
-    if check_directory(origin_path, False) and check_directory(destination_path, True):
-            logging.info(f"Extracting {origin_path} to {destination_path}")
-            extracted_file = "extracted_gz.txt"
-            for filename in os.listdir(origin_path):
-                if filename.endswith(".gz") and not __already_extracted(extracted_file, filename):
-                    src_path = os.path.join(origin_path, filename)
-                    output_filename = filename[:-3]
-                    dst_path = os.path.join(destination_path, output_filename)
-                    logging.info(f"Decompressione: {src_path} -> {dst_path}")
-                    try:
-                        with gzip.open(src_path, "rb") as f_in:
-                            with open(dst_path, "wb") as f_out:
-                                shutil.copyfileobj(f_in, f_out)
-                        __update_extracted(extracted_file, filename, 1)
-                    except (OSError, EOFError) as e:
-                        logging.error(f"Errore decompressione {filename}: {e}")
-                        __update_extracted(extracted_file, filename, 0)
-                        continue
+    if not extracted_gz_list_file:
+        extracted_gz_list_file = "extracted_gz.txt"
 
-def __already_extracted(extracted_file: str, filename: str) -> bool:
+    if not os.path.exists(extracted_gz_list_file):
+        open(extracted_gz_list_file, "a").close()
+
+    if not (check_directory(origin_path, False) and check_directory(destination_path, True)):
+        return
+
+    logging.info(f"Extracting {origin_path} to {destination_path}")
+    extracted_files = __get_extracted_files_list(extracted_gz_list_file)
+
+    for filename in os.listdir(origin_path):
+        if not filename.endswith(".gz") and not __has_already_been_extracted(extracted_files, filename):
+            continue
+
+        src_path = os.path.join(origin_path, filename)
+        dst_path = os.path.join(destination_path, Path(filename).with_suffix("").name)
+
+        logging.info(f"Decompressione: {src_path} -> {dst_path}")
+
+        try:
+            with gzip.open(src_path, "rb") as f_in, open(dst_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+            __update_extracted(extracted_gz_list_file, filename, 1)
+        except (OSError, EOFError) as e:
+            logging.error(f"Errore decompressione {filename}: {e}")
+            __update_extracted(extracted_gz_list_file, filename, 0)
+
+
+def __get_extracted_files_list(extracted_file: str):
+    list_of_files = []
+    if not os.path.exists(extracted_file):
+        return list_of_files
+
     with open(extracted_file, "r", encoding="utf-8") as f:
         for line in f:
             name, *_ = line.strip().split(" ", 1)
-            if name == filename:
-                return True
-    return False
+            list_of_files.append(name)
+    return list_of_files
 
+def __has_already_been_extracted(list_of_files: list[str], filename: str) -> bool:
+    return filename in list_of_files
 
 def __update_extracted(extracted_file: str, filename: str, result_of_extraction_code: int):
     match result_of_extraction_code:
