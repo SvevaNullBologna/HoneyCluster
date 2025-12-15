@@ -44,7 +44,7 @@ def check_directory(path: str | None, creation: bool) -> bool:
 
 
 
-def extract_gz_files(origin_path: str, destination_path: str | None, extracted_gz_list_file: str | None = None) :
+def extract_gz_files(origin_path: str, destination_path: str | None, extracted_gz_list_file: str | None = None) -> (str, str, str):
     """
     Estrae tutti i file .gz nella cartella specificata.
     """
@@ -80,7 +80,8 @@ def extract_gz_files(origin_path: str, destination_path: str | None, extracted_g
         except (OSError, EOFError) as e:
             logging.error(f"Errore decompressione {filename}: {e}")
             __update_extracted(extracted_gz_list_file, filename, 0)
-
+    logging.info(f"End of extraction of gz files")
+    return origin_path, destination_path, extracted_gz_list_file
 
 def __get_extracted_files_list(extracted_file: str):
     list_of_files = []
