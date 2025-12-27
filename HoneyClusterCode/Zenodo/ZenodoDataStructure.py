@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional,List
-
+from Utils.file_worker import drop_nulls
 """
                     Field                             Description
     ===============================   ===========================================================
@@ -155,6 +155,11 @@ class GeolocationData:
     def is_null(self):
         return not any([self.postal_code,self.continent_code,self.country_code3,self.region_name,self.latitude,self.longitude,self.country_name,self.timezone,self.country_code2,self.region_code,self.city_name])
 
+    def to_dict(self):
+        if self.is_null():
+            return None
+        return drop_nulls(self.__dict__)
+
     def __str__(self):
         parts = ["GEOLOCATION:"]
         if self.postal_code:
@@ -222,6 +227,35 @@ class ZenodoEvent:
     size: Optional[str] = None
     filename: Optional[str] = None
     data: Optional[str] = None
+
+    def to_dict(self):
+        d = {
+            "eventid": self.eventid,
+            "dst_host_identifier": self.dst_host_identifier,
+            "timestamp": self.timestamp,
+            "src_ip_identifier": self.src_ip_identifier,
+            "dst_ip_identifier": self.dst_ip_identifier,
+            "message": self.message,
+            "protocol": self.protocol,
+            "src_port": self.scr_port,
+            "sensor": self.sensor,
+            "arch": self.arch,
+            "duration": self.duration,
+            "ssh_client_version": self.ssh_client_version,
+            "username": self.username,
+            "password": self.password,
+            "macCS": self.macCS,
+            "encCS": self.encCS,
+            "kexAlgs": self.kexAlgs,
+            "keyAlgs": self.keyAlgs,
+        }
+
+        if self.geolocation_data:
+            geo = self.geolocation_data.to_dict()
+            if geo:
+                d["geolocation_data"] = geo
+
+        return drop_nulls(d)
 
     def __str__(self):
         parts = ["ZENODO EVENT:", f'eventid: {self.eventid}']
@@ -304,6 +338,11 @@ class ZenodoSession:
         self.session_id = session_id
         self.events = events
 
+    def to_dict(self):
+        return {
+            self.session_id: [e.to_dict() for e in self.events if e.to_dict()]
+        }
+
     def __str__(self):
         parts = [f"Session ID: {self.session_id}"]
         for event in self.events:
@@ -316,7 +355,7 @@ class ZenodoLog:
         self.sessions : list[ZenodoSession] = []
 
     @classmethod
-    def from_json(cls, date_of_log: str, data: list[dict]) -> "ZenodoLog":
+    def _from_json(cls, date_of_log: str, data: list[dict]) -> "ZenodoLog":
         log = cls(date_of_log)
 
         for session_dict in data:
@@ -346,7 +385,7 @@ class ZenodoLog:
                             city_name=geo.get("city_name")
                         )
 
-                    event = ZenodoEvent(
+                    events.append(ZenodoEvent(
                         eventid=eventid,
                         dst_host_identifier=e.get("dst_host_identifier"),
                         timestamp=e.get("timestamp"),
@@ -366,15 +405,22 @@ class ZenodoLog:
                         encCS=e.get("encCS"),
                         kexAlgs=e.get("kexAlgs"),
                         keyAlgs=e.get("keyAlgs")
-                        )
+                        ))
 
-                    events.append(event)
-
-                    if events:
-                        log.sessions.append(ZenodoSession(session_id, events))
-
+                if events:
+                    log.sessions.append(ZenodoSession(session_id, events))
         return log
 
+    @classmethod
+    def clean_json_data(cls, json_data: list[dict], filename: str) -> "ZenodoLog":
+        date = cls.parse_date_from_filename(filename)
+        return cls._from_json(date, json_data)
+
+    def to_dict(self):
+        return {
+            "date": self.date_of_log,
+            "sessions": [s.to_dict() for s in self.sessions]
+        }
 
     def __str__(self):
         parts = ["Zenodo Log:", f"data log: {self.date_of_log}"]
@@ -391,3 +437,6 @@ class ZenodoLog:
         print(f"Date of Log: {self.date_of_log}")
         for s in self.sessions:
             print(s)
+
+
+

@@ -5,13 +5,24 @@ import shutil
 
 from pathlib import Path
 
+
+"""
+////////////////////////////////////////////////////////////////////////////////////////////
+                                    UTILS
+////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+def drop_nulls(d: dict)-> dict:
+    return {k: v for k, v in d.items() if v is not None}
+
+
 def contains_file_type(folder: str, extension: str)-> int:
     folder_path = Path(folder)
     files = list(folder_path.glob(f"*{extension}"))
     return len(files)
 
 
-def check_directory(path: str | None, creation: bool) -> bool:
+def check_directory(path: Path | None, creation: bool) -> bool:
     if not path:
         logging.error("Path cannot be empty")
         return False
@@ -27,40 +38,54 @@ def check_directory(path: str | None, creation: bool) -> bool:
         return True
 
 
-def extract_gz_files(origin_path: str, destination_path: str | None) -> (str, str):
-    """
+def _already_exists(destination_path, filename: str) -> bool:
+    return os.path.exists(os.path.join(destination_path, filename))
+
+
+def extract_gz_file(original_path: Path, destination_path: Path, filename: str) -> bool :
+
+    if not filename.endswith(".gz") or _already_exists(destination_path, Path(filename).with_suffix("").name):
+        logging.info(f"skipping {filename}")
+        return False
+
+    src_path = os.path.join(original_path, filename)
+    dst_path = os.path.join(destination_path, Path(filename).with_suffix("").name)
+
+    try:
+        with gzip.open(src_path, "rb") as f_in, open(dst_path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        logging.info(f"Decompressione di {filename} in {src_path} -> {dst_path}")
+    except (OSError, EOFError) as e:
+        logging.error(f"Errore decompressione {filename}: {e}")
+        return False
+    return True
+
+
+
+"""
+def extract_gz_files(origin_path: str, destination_path: str | None) -> str|None :
+    
     Estrae tutti i file .gz nella cartella specificata.
-    """
+    
     if not destination_path :
         destination_path = origin_path
 
     if not (check_directory(origin_path, False) and check_directory(destination_path, True)):
-        return None,None
+        return None
 
-    logging.info(f"Extracting {origin_path} to {destination_path}")
-
+    extracted = 0
     for filename in os.listdir(origin_path):
-        if not filename.endswith(".gz") or __has_already_been_extracted(destination_path, Path(filename).with_suffix("").name):
-            logging.info(f"skipping {filename}")
-            continue
+        if extract_gz_file(origin_path, destination_path, filename):
+            extracted += 1
 
-        src_path = os.path.join(origin_path, filename)
-        dst_path = os.path.join(destination_path, Path(filename).with_suffix("").name)
-        try:
-            with gzip.open(src_path, "rb") as f_in, open(dst_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            logging.info(f"Decompressione di {filename} in {src_path} -> {dst_path}")
-        except (OSError, EOFError) as e:
-            logging.error(f"Errore decompressione {filename}: {e}")
-    logging.info(f"End of extraction of gz files")
-    return origin_path, destination_path
-
-def __has_already_been_extracted(destination_path, filename: str) -> bool:
-    return os.path.exists(os.path.join(destination_path, filename))
+    logging.info(f"End of extraction of gz files. Extracted : {extracted}")
+    return destination_path
 
 
 
-def __append_to_file(filename: str, row: str) -> None:
+
+
+def _append_to_file(filename: str, row: str) -> None:
     with open(filename, "a", encoding="utf-8") as f:
         f.write(row + "\n")
 
@@ -76,5 +101,5 @@ def main():
 if __name__ == "__main__":
     main()
 
-
+"""
 
