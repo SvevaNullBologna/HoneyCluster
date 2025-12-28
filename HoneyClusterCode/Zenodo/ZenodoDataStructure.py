@@ -1,6 +1,8 @@
+import logging
 from dataclasses import dataclass
 from typing import Optional,List
 from Utils.file_worker import drop_nulls
+import json
 """
                     Field                             Description
     ===============================   ===========================================================
@@ -338,9 +340,19 @@ class ZenodoSession:
         self.session_id = session_id
         self.events = events
 
+
+    def get_duration(self):
+        pass
+
     def to_dict(self):
+        events_dicts = []
+        for e in self.events:
+            d = e.to_dict()
+            if d:
+                events_dicts.append(d)
+
         return {
-            self.session_id: [e.to_dict() for e in self.events if e.to_dict()]
+            self.session_id: events_dicts
         }
 
     def __str__(self):
@@ -354,6 +366,28 @@ class ZenodoLog:
         self.date_of_log = date_of_log # funziona un po' da chiave primaria. Viene recuperato dal nome del file
         self.sessions : list[ZenodoSession] = []
 
+    """
+        NUMERIC FEATURES
+    """
+    # TIME
+    def get_duration_of_sessions(self):
+        session_durations = []
+        for session in self.sessions:
+            session_durations.append({session.session_id : session.get_duration()})
+        return { f"{self.date_of_log}" : session_durations }
+
+    def get_average_time_between_sessions(self):
+        pass
+
+
+
+
+    # COMMANDS
+    # BEHAVIOUR
+
+    """
+        READING AND WRITING JSON FILE
+    """
     @classmethod
     def _from_json(cls, date_of_log: str, data: list[dict]) -> "ZenodoLog":
         log = cls(date_of_log)
@@ -421,6 +455,54 @@ class ZenodoLog:
             "date": self.date_of_log,
             "sessions": [s.to_dict() for s in self.sessions]
         }
+
+    def write_on_file(self, filename) -> bool:
+        """
+        Scrive il log su file JSON in modalità progressiva per evitare freeze su dataset grandi.
+        La struttura sarà:
+        {
+            "date": "2025-12-28",
+            "sessions": [
+                { "session_id_1": [event1, event2, ...] },
+                { "session_id_2": [...] }
+            ]
+        }
+        """
+        try:
+            with open(filename, 'w', encoding="utf-8") as f:
+                # intestazione
+                f.write('{\n')
+                f.write(f'    "date": "{self.date_of_log}",\n')
+                f.write('    "sessions": [\n')
+
+                for i, session in enumerate(self.sessions):
+                    # converto in dict e dump con indentazione di 8 spazi
+                    session_json = json.dumps(session.to_dict(), ensure_ascii=False, indent=8)
+                    # aggiungo rientro di 4 spazi per allineare con "sessions"
+                    indented = '\n'.join(['    ' + line for line in session_json.splitlines()])
+                    f.write(indented)
+                    if i < len(self.sessions) - 1:
+                        f.write(",\n")
+                    else:
+                        f.write("\n")
+
+                f.write('    ]\n')
+                f.write('}\n')
+
+            logging.info(f"Zenodo log written successfully to {filename}")
+            return True
+        except Exception as e:
+            logging.error(f"error in writing file : {e}")
+            return False
+
+    def read_file(self, filename: str) -> "ZenodoLog|None" :
+        try:
+            with open(filename, 'r', encoding="utf-8") as f:
+                json_data = json.load(f)
+                return ZenodoLog.clean_json_data(json_data, filename)
+        except Exception as e:
+            logging.error(f"error in reading file, could not get a valid ZenodoDataStructure : {e}")
+            return None
 
     def __str__(self):
         parts = ["Zenodo Log:", f"data log: {self.date_of_log}"]

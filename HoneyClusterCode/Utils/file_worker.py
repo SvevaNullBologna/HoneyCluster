@@ -42,8 +42,8 @@ def _already_exists(destination_path, filename: str) -> bool:
     return os.path.exists(os.path.join(destination_path, filename))
 
 
-def extract_gz_file(original_path: Path, destination_path: Path, filename: str) -> bool :
-
+def extract_gz_file(original_path: Path, destination_path: Path, filename) -> bool :
+    filename = str(filename)
     if not filename.endswith(".gz") or _already_exists(destination_path, Path(filename).with_suffix("").name):
         logging.info(f"skipping {filename}")
         return False
