@@ -1,6 +1,11 @@
 import logging
 from dataclasses import dataclass
+from email.policy import default
+from pathlib import Path
 from typing import Optional,List
+
+import ijson
+
 from Utils.file_worker import drop_nulls
 import json
 """
@@ -155,7 +160,23 @@ class GeolocationData:
     city_name: Optional[str] = None
 
     def is_null(self):
-        return not any([self.postal_code,self.continent_code,self.country_code3,self.region_name,self.latitude,self.longitude,self.country_name,self.timezone,self.country_code2,self.region_code,self.city_name])
+        return not any(self.__dict__.values())
+    @staticmethod
+    def from_raw(geo: dict|None)-> "GeolocationData | None":
+        if not geo:
+            return None
+        return GeolocationData(postal_code=geo.get("postal_code"),
+                               continent_code=geo.get("continent_code"),
+                               country_code3=geo.get("country_code3"),
+                               region_name=geo.get("region_name"),
+                               latitude=geo.get("latitude"),
+                               longitude=geo.get("longitude"),
+                               country_name=geo.get("country_name"),
+                               timezone=geo.get("timezone"),
+                               country_code2=geo.get("country_code2"),
+                               region_code=geo.get("region_code"),
+                               city_name=geo.get("city_name")
+                               )
 
     def to_dict(self):
         if self.is_null():
@@ -187,8 +208,6 @@ class GeolocationData:
         if self.city_name:
             parts.append(f'city name: {self.city_name}')
         return "\n".join(parts)
-
-
 @dataclass
 class ZenodoEvent:
     # === REQUIRED ===
@@ -201,7 +220,7 @@ class ZenodoEvent:
     dst_ip_identifier: Optional[str] = None
     message: Optional[str] = None
     protocol: Optional[str] = None
-    scr_port: Optional[str] = None
+    src_port: Optional[str] = None
     sensor: Optional[str] = None
     geolocation_data: Optional[GeolocationData] = None
     arch: Optional[str] = None
@@ -239,7 +258,7 @@ class ZenodoEvent:
             "dst_ip_identifier": self.dst_ip_identifier,
             "message": self.message,
             "protocol": self.protocol,
-            "src_port": self.scr_port,
+            "src_port": self.src_port,
             "sensor": self.sensor,
             "arch": self.arch,
             "duration": self.duration,
@@ -259,6 +278,36 @@ class ZenodoEvent:
 
         return drop_nulls(d)
 
+    @staticmethod
+    def from_raw(e: dict) -> "ZenodoEvent | None":
+        eventid = e.get("eventid")
+        if not eventid:
+            return None
+
+        geo_obj = GeolocationData.from_raw(e.get("geolocation_data"))
+
+        return ZenodoEvent(
+            eventid=eventid,
+            dst_host_identifier=e.get("dst_host_identifier"),
+            timestamp=e.get("timestamp"),
+            src_ip_identifier=e.get("src_ip_identifier"),
+            dst_ip_identifier=e.get("dst_ip_identifier"),
+            message=e.get("message"),
+            protocol=e.get("protocol"),
+            src_port=e.get("src_port"),
+            sensor=e.get("sensor"),
+            geolocation_data=geo_obj,
+            arch=e.get("arch"),
+            duration=e.get("duration"),
+            ssh_client_version=e.get("ssh_client_version"),
+            username=e.get("username"),
+            password=e.get("password"),
+            macCS=e.get("macCS"),
+            encCS=e.get("encCS"),
+            kexAlgs=e.get("kexAlgs"),
+            keyAlgs=e.get("keyAlgs")
+        )
+
     def __str__(self):
         parts = ["ZENODO EVENT:", f'eventid: {self.eventid}']
         if self.dst_host_identifier :
@@ -273,8 +322,8 @@ class ZenodoEvent:
             parts.append(f'message: {self.message}')
         if self.protocol:
             parts.append(f'protocol: {self.protocol}')
-        if self.scr_port:
-            parts.append(f'scr_port: {self.scr_port}')
+        if self.src_port:
+            parts.append(f'src_port: {self.src_port}')
         if self.sensor:
             parts.append(f'sensor: {self.sensor}')
         if self.geolocation_data and not self.geolocation_data.is_null():
@@ -328,44 +377,38 @@ class ZenodoEvent:
         if self.data:
             parts.append(f'data: {self.data}')
         return "\n".join(parts)
-
+@dataclass
 class ZenodoSession:
     session_id: str
     events: List[ZenodoEvent]
-    def __init__(self, session_id: str, events: list[ZenodoEvent]):
-        if not session_id :
-            raise ValueError('session_id must not be None')
-        if not events :
-            raise ValueError('events must not be None')
-        self.session_id = session_id
-        self.events = events
-
-
-    def get_duration(self):
-        pass
 
     def to_dict(self):
-        events_dicts = []
-        for e in self.events:
-            d = e.to_dict()
-            if d:
-                events_dicts.append(d)
+        events_dicts = [e.to_dict() for e in self.events if e.to_dict()]
+        return {self.session_id: events_dicts}
+    @staticmethod
+    def from_raw(session_id, events_raw):
+        events: List[ZenodoEvent] = []
 
-        return {
-            self.session_id: events_dicts
-        }
+        for e in events_raw:
+            ze = ZenodoEvent.from_raw(e)
+            if ze:
+                events.append(ze)
+
+        return ZenodoSession(
+            session_id=session_id,
+            events=events
+        )
 
     def __str__(self):
         parts = [f"Session ID: {self.session_id}"]
         for event in self.events:
             parts.append(str(event))
         return "\n".join(parts)
-
+@dataclass
 class ZenodoLog:
-    def __init__(self, date_of_log):
-        self.date_of_log = date_of_log # funziona un po' da chiave primaria. Viene recuperato dal nome del file
-        self.sessions : list[ZenodoSession] = []
-
+    date_of_log: str
+    sessions : List[ZenodoSession]
+    events: List[ZenodoEvent]
     """
         NUMERIC FEATURES
     """
@@ -379,76 +422,12 @@ class ZenodoLog:
     def get_average_time_between_sessions(self):
         pass
 
-
-
-
     # COMMANDS
     # BEHAVIOUR
 
     """
         READING AND WRITING JSON FILE
     """
-    @classmethod
-    def _from_json(cls, date_of_log: str, data: list[dict]) -> "ZenodoLog":
-        log = cls(date_of_log)
-
-        for session_dict in data:
-            # session_dict ha solo una chiave, ovvero il session_id
-            for session_id, event_list in session_dict.items():
-                events: list[ZenodoEvent] = []
-
-                for e in event_list:
-                    eventid = e.get("eventid")
-                    if not eventid:
-                        continue #eventid è required
-
-                    geo_data = None
-                    geo = e.get("geolocation_data")
-                    if geo:
-                        geo_data = GeolocationData(
-                            postal_code=geo.get("postal_code"),
-                            continent_code=geo.get("continent_code"),
-                            country_code3=geo.get("country_code3"),
-                            region_name=geo.get("region_name"),
-                            latitude=geo.get("latitude"),
-                            longitude=geo.get("longitude"),
-                            country_name=geo.get("country_name"),
-                            timezone=geo.get("timezone"),
-                            country_code2=geo.get("country_code2"),
-                            region_code=geo.get("region_code"),
-                            city_name=geo.get("city_name")
-                        )
-
-                    events.append(ZenodoEvent(
-                        eventid=eventid,
-                        dst_host_identifier=e.get("dst_host_identifier"),
-                        timestamp=e.get("timestamp"),
-                        src_ip_identifier=e.get("src_ip_identifier"),
-                        dst_ip_identifier=e.get("dst_ip_identifier"),
-                        message=e.get("message"),
-                        protocol=e.get("protocol"),
-                        scr_port=e.get("src_port"),
-                        sensor=e.get("sensor"),
-                        geolocation_data=geo_data,
-                        arch=e.get("arch"),
-                        duration=e.get("duration"),
-                        ssh_client_version=e.get("ssh_client_version"),
-                        username=e.get("username"),
-                        password=e.get("password"),
-                        macCS=e.get("macCS"),
-                        encCS=e.get("encCS"),
-                        kexAlgs=e.get("kexAlgs"),
-                        keyAlgs=e.get("keyAlgs")
-                        ))
-
-                if events:
-                    log.sessions.append(ZenodoSession(session_id, events))
-        return log
-
-    @classmethod
-    def clean_json_data(cls, json_data: list[dict], filename: str) -> "ZenodoLog":
-        date = cls.parse_date_from_filename(filename)
-        return cls._from_json(date, json_data)
 
     def to_dict(self):
         return {
@@ -456,7 +435,8 @@ class ZenodoLog:
             "sessions": [s.to_dict() for s in self.sessions]
         }
 
-    def write_on_file(self, filename) -> bool:
+    @staticmethod
+    def write_on_file(filename, zlog: "ZenodoLog") -> bool:
         """
         Scrive il log su file JSON in modalità progressiva per evitare freeze su dataset grandi.
         La struttura sarà:
@@ -472,16 +452,16 @@ class ZenodoLog:
             with open(filename, 'w', encoding="utf-8") as f:
                 # intestazione
                 f.write('{\n')
-                f.write(f'    "date": "{self.date_of_log}",\n')
+                f.write(f'    "date": "{zlog.date_of_log}",\n')
                 f.write('    "sessions": [\n')
 
-                for i, session in enumerate(self.sessions):
+                for i, session in enumerate(zlog.sessions):
                     # converto in dict e dump con indentazione di 8 spazi
-                    session_json = json.dumps(session.to_dict(), ensure_ascii=False, indent=8)
+                    session_json = json.dumps(session.to_dict(), ensure_ascii=False, indent=8, default=float)
                     # aggiungo rientro di 4 spazi per allineare con "sessions"
                     indented = '\n'.join(['    ' + line for line in session_json.splitlines()])
                     f.write(indented)
-                    if i < len(self.sessions) - 1:
+                    if i < len(zlog.sessions) - 1:
                         f.write(",\n")
                     else:
                         f.write("\n")
@@ -495,15 +475,30 @@ class ZenodoLog:
             logging.error(f"error in writing file : {e}")
             return False
 
-    def read_file(self, filename: str) -> "ZenodoLog|None" :
+    @staticmethod
+    def read_file(filename: Path) -> "ZenodoLog|None" :
         try:
-            with open(filename, 'r', encoding="utf-8") as f:
-                json_data = json.load(f)
-                return ZenodoLog.clean_json_data(json_data, filename)
+            log = ZenodoLog(
+                date_of_log=ZenodoLog.parse_date_from_filename(filename.name),
+                sessions=[],
+                events=[]
+            )
+            with open(filename, 'rb') as f:
+                parser = ijson.items(f, 'sessions.item')
+                for block in parser:
+                    #block è di tipo: {"session_id": [event1, event2, ...]}
+                    for session_id,events_raw in block.items():
+                        session = ZenodoSession.from_raw(session_id, events_raw)
+                        log.sessions.append(session)
+
+            return log
+
         except Exception as e:
             logging.error(f"error in reading file, could not get a valid ZenodoDataStructure : {e}")
             return None
 
+    def _process_session(self,):
+        pass
     def __str__(self):
         parts = ["Zenodo Log:", f"data log: {self.date_of_log}"]
         for session in self.sessions:

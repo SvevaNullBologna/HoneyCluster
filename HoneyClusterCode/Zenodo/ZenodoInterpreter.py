@@ -1,8 +1,9 @@
 import logging
-import os.path
 from pathlib import Path
+import gzip
+import json
+import ijson
 
-import Zenodo.ZenodoDataStructure
 from Utils import file_worker as fw
 
 """
@@ -32,6 +33,32 @@ from Utils import file_worker as fw
 """
 
 
+def _clean_geolocation(geo:dict) -> dict | None:
+    if not geo:
+        return None
+    geo_clean = {k: float(v) if type(v).__name__ == "Decimal" else v for k,v in geo.items() if v is not None}
+    return geo_clean if geo_clean else None
+
+
+def _parse_date_from_filename(filename:str) -> str:
+    return filename.removesuffix(".gz").removeprefix("cyberlab_")
+
+
+def _clean_event(e:dict) -> dict | None:
+    if not e.get("eventid"):
+        return None
+
+    cleaned = {}
+    for k,v in e.items():
+        if k == "session_id":
+            continue
+        if v is not None:
+            if type(v).__name__ == "Decimal":
+                v = float(v)
+            cleaned[k] = v
+    return cleaned
+
+
 class ZenodoInterpreter:
     def __init__(self, zenodo_local_path: Path):
         logging.info("Zenodo Interpreter started.")
@@ -39,63 +66,72 @@ class ZenodoInterpreter:
             logging.error("no downloaded dataset directory found. Check path and try again")
             raise NotADirectoryError("no downloaded dataset directory found. Check path and try again")
         self.originals = zenodo_local_path / "original"
-        fw.check_directory(zenodo_local_path / "extracted", True)
-        self.extracted = zenodo_local_path / "extracted"
         fw.check_directory(zenodo_local_path / "cleaned", True)
         self.cleaned = zenodo_local_path / "cleaned"
 
-    def extract_if_needed(self, gz_filename: str) -> Path | None:
-        json_name = Path(gz_filename).with_suffix("").name
-        if os.path.exists(self.extracted / json_name):
-            logging.info(f"{json_name} already extracted")
-            return Path(self.extracted / json_name)
+    def extract_and_clean_all_zenodo_logs_in_folder(self) -> bool:
+        completed = False
+        for filename in self.originals.glob("*.json.gz"):
+            completed &= self._clean_zenodo_gz(filename)
+        return completed
 
-        if not self.originals / gz_filename:
-            logging.info(f"Cannot extract: no original file found in {self.originals}")
-            return None
-        else:
-            ok = fw.extract_gz_file(self.originals, self.extracted , gz_filename)
-            if not ok:
-                logging.error(f"{gz_filename} not extracted")
-                return None
-            else:
-                logging.info(f"{gz_filename} extracted")
-                return Path(self.extracted / gz_filename)
+    def _clean_zenodo_gz(self, gz_path: Path) -> bool:
+        log_date = _parse_date_from_filename(gz_path.name)
+        out_file = (self.cleaned / log_date).with_suffix(".json")
 
-    def extract_and_clean_raw_zenodo_log(self, gz_filename) -> bool:
-        extracted_json = self.extract_if_needed(gz_filename)
-        if not extracted_json:
-            return False
-
-        cleaned_json = self.cleaned / extracted_json.name
-        if cleaned_json.exists():
-            logging.info(f"{cleaned_json} already cleaned")
+        if out_file.exists():
+            logging.info(f"skipping {log_date}. It has already been cleaned")
             return True
 
         try:
-            # 1. Carica e pulisci il log
-            logging.info(f"cleaning file")
-            with open(extracted_json, 'r', encoding='utf-8') as f:
-                raw_data = Zenodo.ZenodoDataStructure.json.load(f)
+            logging.info(f"cleaning {log_date} to {out_file}")
+            with gzip.open(gz_path, "rb") as f, open(out_file, "w", encoding="utf-8") as out:
 
-            log = Zenodo.ZenodoDataStructure.ZenodoLog.clean_json_data(raw_data, extracted_json.name)
+                out.write('{\n')
+                out.write(f'    "date": "{log_date}",\n')
+                out.write(' "sessions": [\n')
 
-            # 2. Scrivi il log su file (evento per evento)
-            log.write_on_file(cleaned_json)
+                first_session = True
+                for session in ijson.items(f, "item"):
+                    session_id, events = next(iter(session.items()))
+                    cleaned_events = []
 
-            return True
+                    for e in events:
+                        cleaned = _clean_event(e)
+                        if not cleaned:
+                            continue
+
+                        #pulizia geolocation_data
+                        geo = cleaned.get("geolocation_data")
+                        geo_clean = _clean_geolocation(geo)
+
+                        if geo_clean:
+                            cleaned["geolocation_data"] = geo_clean
+                        else:
+                            cleaned.pop("geolocation_data", None)
+
+                        cleaned_events.append(cleaned)
+
+                    if not cleaned_events:
+                        continue
+
+                    if not first_session:
+                        out.write(",\n")
+
+                    first_session = False
+
+                    json.dump({session_id: cleaned_events}, out, ensure_ascii=False, default=float)
+
+                out.write("\n   ]\n}")
+                return True
         except Exception as e:
-            logging.error(f"error in extracting file : {e}")
+            logging.error(f"error cleaning {gz_path.name}: {e}")
             return False
-
-    def interpret_all_zenodo_logs_in_originals_folder(self):
-        for gz_filename in self.originals.glob("*.gz"):
-            self.extract_and_clean_raw_zenodo_log(gz_filename)
 
 
 def main() -> None:
     logging.basicConfig(level=logging.DEBUG)
     zenodo_interpreter = ZenodoInterpreter(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-    zenodo_interpreter.interpret_all_zenodo_logs_in_originals_folder()
+    zenodo_interpreter.extract_and_clean_all_zenodo_logs_in_folder()
 if __name__ == "__main__":
     main()
