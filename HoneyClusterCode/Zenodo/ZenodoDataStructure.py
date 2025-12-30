@@ -382,6 +382,9 @@ class ZenodoSession:
     session_id: str
     events: List[ZenodoEvent]
 
+    def get_duration(self):
+        pass
+
     def to_dict(self):
         events_dicts = [e.to_dict() for e in self.events if e.to_dict()]
         return {self.session_id: events_dicts}
@@ -404,6 +407,8 @@ class ZenodoSession:
         for event in self.events:
             parts.append(str(event))
         return "\n".join(parts)
+
+
 @dataclass
 class ZenodoLog:
     date_of_log: str
@@ -497,8 +502,6 @@ class ZenodoLog:
             logging.error(f"error in reading file, could not get a valid ZenodoDataStructure : {e}")
             return None
 
-    def _process_session(self,):
-        pass
     def __str__(self):
         parts = ["Zenodo Log:", f"data log: {self.date_of_log}"]
         for session in self.sessions:
