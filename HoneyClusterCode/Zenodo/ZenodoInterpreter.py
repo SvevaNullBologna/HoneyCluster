@@ -1,10 +1,10 @@
 import logging
+import os
 from pathlib import Path
 import gzip
 import json
 import ijson
 
-from Utils import file_worker as fw
 
 """
         def download_zenodo_dataset(self, record_id):
@@ -62,11 +62,11 @@ def _clean_event(e:dict) -> dict | None:
 class ZenodoInterpreter:
     def __init__(self, zenodo_local_path: Path):
         logging.info("Zenodo Interpreter started.")
-        if not fw.check_directory(zenodo_local_path / "original", False):
+        if not check_directory(zenodo_local_path / "original", False):
             logging.error("no downloaded dataset directory found. Check path and try again")
             raise NotADirectoryError("no downloaded dataset directory found. Check path and try again")
         self.originals = zenodo_local_path / "original"
-        fw.check_directory(zenodo_local_path / "cleaned", True)
+        check_directory(zenodo_local_path / "cleaned", True)
         self.cleaned = zenodo_local_path / "cleaned"
 
     def extract_and_clean_all_zenodo_logs_in_folder(self) -> bool:
@@ -129,9 +129,23 @@ class ZenodoInterpreter:
             return False
 
 
-def main() -> None:
-    logging.basicConfig(level=logging.DEBUG)
-    zenodo_interpreter = ZenodoInterpreter(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-    zenodo_interpreter.extract_and_clean_all_zenodo_logs_in_folder()
-if __name__ == "__main__":
-    main()
+"""
+////////////////////////////////////////////////////////////////////////////////////////////
+                                    UTILS
+////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+def check_directory(path: Path | None, creation: bool) -> bool:
+    if not path:
+        logging.error("Path cannot be empty")
+        return False
+    if not os.path.isdir(path):
+        logging.error(f"Directory non valida: {path}")
+        if creation:
+            os.makedirs(path, exist_ok=True)
+            logging.info(f"Directory creata: {path}")
+            return True
+        return False
+    else:
+        logging.info(f"Directory valida: {path}")
+        return True

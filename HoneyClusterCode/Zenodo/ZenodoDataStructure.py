@@ -1,12 +1,10 @@
 import logging
 from dataclasses import dataclass
-from email.policy import default
 from pathlib import Path
 from typing import Optional,List
+from datetime import datetime
 
 import ijson
-
-from Utils.file_worker import drop_nulls
 import json
 """
                     Field                             Description
@@ -308,6 +306,40 @@ class ZenodoEvent:
             keyAlgs=e.get("keyAlgs")
         )
 
+    def get_time(self) -> Optional[datetime]:
+        """ nel json "timestamp": "2019-05-18T00:00:16.582846Z" """
+        if not self.timestamp:
+            logging.error("empty timestamp")
+            return None
+        try:
+            dt = datetime.fromisoformat(self.timestamp.replace("Z", "+00:00"))
+            return dt
+        except ValueError:
+            logging.warning(f"Invalid timestamp: {self.timestamp}")
+            return None
+    """ 
+    ////////////////////////////// ESTRAZIONE DEI DATI /////////////////////////////////
+    """
+    def is_connect(self) -> int:
+        match self.eventid:
+            case "cowrie.session.connect":
+                return 1
+            case "cowrie.session.closed":
+                return 0
+            case "cowrie.login.failed":
+                return -1
+            case "cowrie.login.success":
+                return 2
+            case "cowrie.command.input":
+                return 3
+            case "cowrie.client.version":
+                return 4
+            case _:
+                logging.error(f"unknown event: {self.eventid}")
+                return -2
+    """
+    ////////////////////////////////////////////////////////////////////////////////////
+    """
     def __str__(self):
         parts = ["ZENODO EVENT:", f'eventid: {self.eventid}']
         if self.dst_host_identifier :
@@ -382,8 +414,15 @@ class ZenodoSession:
     session_id: str
     events: List[ZenodoEvent]
 
-    def get_duration(self):
-        pass
+    def get_event_count(self) -> int:
+        return len(self.events)
+
+    def get_duration(self) -> float | None:
+        times = [ event.get_time() for event in self.events if event.get_time() is not None ]
+        if len(times) < 2:
+            return  None
+        return (max(times) - min(times)).total_seconds()
+
 
     def to_dict(self):
         events_dicts = [e.to_dict() for e in self.events if e.to_dict()]
@@ -519,4 +558,13 @@ class ZenodoLog:
             print(s)
 
 
+
+"""
+////////////////////////////////////////////////////////////////////////////////////////////
+                                    UTILS
+////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+def drop_nulls(d: dict)-> dict:
+    return {k: v for k, v in d.items() if v is not None}
 
