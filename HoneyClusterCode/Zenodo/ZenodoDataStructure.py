@@ -306,6 +306,10 @@ class ZenodoEvent:
             keyAlgs=e.get("keyAlgs")
         )
 
+    """ 
+        ////////////////////////////// ESTRAZIONE DEI DATI /////////////////////////////////
+    """
+
     def get_time(self) -> Optional[datetime]:
         """ nel json "timestamp": "2019-05-18T00:00:16.582846Z" """
         if not self.timestamp:
@@ -317,26 +321,37 @@ class ZenodoEvent:
         except ValueError:
             logging.warning(f"Invalid timestamp: {self.timestamp}")
             return None
-    """ 
-    ////////////////////////////// ESTRAZIONE DEI DATI /////////////////////////////////
-    """
+
     def is_connect(self) -> int:
         match self.eventid:
             case "cowrie.session.connect":
                 return 1
             case "cowrie.session.closed":
-                return 0
-            case "cowrie.login.failed":
-                return -1
-            case "cowrie.login.success":
                 return 2
-            case "cowrie.command.input":
+            case "cowrie.login.failed":
                 return 3
-            case "cowrie.client.version":
+            case "cowrie.login.success":
                 return 4
+            case "cowrie.command.input":
+                return 5
+            case "cowie.command.success":
+                return 6
+            case "cowrie.client.version":
+                return 7
+            case "cowrie.client.kex":
+                return 8
+            case "cowrie.direct-tcpip.request":
+                return 9
+            case "cowrie.log.closed":
+                return 10
+            case "cowrie.client.fingerprint":
+                return 11
             case _:
                 logging.error(f"unknown event: {self.eventid}")
-                return -2
+                return -1
+
+    def decifer_message(self):
+        logging.info(self.message)
     """
     ////////////////////////////////////////////////////////////////////////////////////
     """
@@ -452,7 +467,6 @@ class ZenodoSession:
 class ZenodoLog:
     date_of_log: str
     sessions : List[ZenodoSession]
-    events: List[ZenodoEvent]
     """
         NUMERIC FEATURES
     """
@@ -524,8 +538,7 @@ class ZenodoLog:
         try:
             log = ZenodoLog(
                 date_of_log=ZenodoLog.parse_date_from_filename(filename.name),
-                sessions=[],
-                events=[]
+                sessions=[]
             )
             with open(filename, 'rb') as f:
                 parser = ijson.items(f, 'sessions.item')
