@@ -6,6 +6,7 @@ from datetime import datetime
 
 import ijson
 import json
+import re
 """
                     Field                             Description
     ===============================   ===========================================================
@@ -143,8 +144,20 @@ ogni LogFile contiene qualcosa del tipo:
  
 """
 
+"""funziona come una matrioska!
+    ZenodoLog contiene la data del log (che lo identifica) e una lista di ZenodoSession
+    ZenodoSession contiene un identificatore di sessione e una lista di ZenodoEvent
+    ZenodoEvent contiene un identificatore di evento e una lista di attributi che combaciano con quelli dei documenti estratti da Zenodo
+    Dato che ciascun ZenodoEvent ha al suo interno un insieme di attributi riguardanti la loro geolocazione, sono stati racchiusi in una classe 
+    
+    NB: 
+    1. i nomi degli attributi sono uguali a quelli nei documenti estratti
+    2. Questa è una struttura dati AD HOC per il formato dei file json del dataset Zanodo, si occupa di manipolarli, immagazzinarli ed estrarre qualche caratteristica
+    3. NON è L'ASPETTO FINALE CHE LE INFORMAZIONI OTTENUTE AVRANNO 
+"""
+
 @dataclass
-class GeolocationData:
+class GeolocationData: # classe per poter manipolare i singoli
     postal_code: Optional[str] = None
     continent_code: Optional[str] = None
     country_code3: Optional[str] = None
@@ -322,36 +335,43 @@ class ZenodoEvent:
             logging.warning(f"Invalid timestamp: {self.timestamp}")
             return None
 
-    def is_connect(self) -> int:
-        match self.eventid:
-            case "cowrie.session.connect":
-                return 1
-            case "cowrie.session.closed":
-                return 2
-            case "cowrie.login.failed":
-                return 3
-            case "cowrie.login.success":
-                return 4
-            case "cowrie.command.input":
-                return 5
-            case "cowie.command.success":
-                return 6
-            case "cowrie.client.version":
-                return 7
-            case "cowrie.client.kex":
-                return 8
-            case "cowrie.direct-tcpip.request":
-                return 9
-            case "cowrie.log.closed":
-                return 10
-            case "cowrie.client.fingerprint":
-                return 11
-            case _:
-                logging.error(f"unknown event: {self.eventid}")
-                return -1
+    def _is_command(self) -> int:
+        if not self.eventid.startswith("cowrie.command"):
+            return -1
+        if self.eventid.endswith("success"):
+            return 1
+        if self.eventid.endswith("failure"):
+            return 0
+        return 2
 
-    def decifer_message(self):
-        logging.info(self.message)
+    @staticmethod
+    def _normalize_command(cmd: str) -> str:
+        s = cmd.strip()
+        s = re.sub(r'^CMD:\s*', '', s)
+
+        s = re.sub(r'echo\s+-e\s+"[^"]+"(\|passwd\|bash)?',
+                     'echo <SECRET>|passwd', s)
+        s = re.sub(r'echo\s+"[^"]+"\|passwd',
+                     'echo <SECRET>|passwd', s)
+
+        s = re.sub(r'/var/tmp/[.\w-]*\d{3,}', '/var/tmp/<FILE>', s)
+        s = re.sub(r'/tmp/[.\w-]*\d{3,}', '/tmp/<FILE>', s)
+        s = re.sub(r'\b[\w.-]+\.(log|txt|sh|bin|exe|tgz|gz)\b',
+                     '<FILE>', s)
+
+        s = re.sub(r'(https?|ftp)://\S+', '<URL>', s)
+        s = re.sub(r'\b\d{1,3}(?:\.\d{1,3}){3}\b', '<IP>', s)
+
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+
+    def extract_command(self) -> str | None:
+        if not self.message or self._is_command() == -1 :
+            logging.error("no valid message")
+            return None
+        return self._normalize_command(self.message)
+
     """
     ////////////////////////////////////////////////////////////////////////////////////
     """
@@ -461,8 +481,6 @@ class ZenodoSession:
         for event in self.events:
             parts.append(str(event))
         return "\n".join(parts)
-
-
 @dataclass
 class ZenodoLog:
     date_of_log: str
