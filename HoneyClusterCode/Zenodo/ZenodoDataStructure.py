@@ -193,6 +193,12 @@ class GeolocationData: # classe per poter manipolare i singoli
         if self.is_null():
             return None
         return drop_nulls(self.__dict__)
+    """
+    ////////////////GET INFO///////////////////
+    """
+
+    def get_continent_code(self) -> Optional[str]:
+        return self.country_code2
 
     def __str__(self):
         parts = ["GEOLOCATION:"]
@@ -335,7 +341,14 @@ class ZenodoEvent:
             logging.warning(f"Invalid timestamp: {self.timestamp}")
             return None
 
-    def _is_command(self) -> int:
+    def is_command(self) -> int:
+        """
+        -1 = not a command
+         0 = command failure
+         1 = command success
+         2 = command input / unknown
+        """
+
         if not self.eventid.startswith("cowrie.command"):
             return -1
         if self.eventid.endswith("success"):
@@ -345,7 +358,7 @@ class ZenodoEvent:
         return 2
 
     @staticmethod
-    def _normalize_command(cmd: str) -> str:
+    def normalize_command(cmd: str) -> str:
         s = cmd.strip()
         s = re.sub(r'^CMD:\s*', '', s)
 
@@ -367,10 +380,13 @@ class ZenodoEvent:
 
 
     def extract_command(self) -> str | None:
-        if not self.message or self._is_command() == -1 :
+        if not self.message:
             logging.error("no valid message")
             return None
-        return self._normalize_command(self.message)
+        if self.is_command() == -1:
+            logging.error("invalid command")
+            return None
+        return self.normalize_command(self.message)
 
     """
     ////////////////////////////////////////////////////////////////////////////////////
@@ -449,8 +465,28 @@ class ZenodoSession:
     session_id: str
     events: List[ZenodoEvent]
 
-    def get_event_count(self) -> int:
-        return len(self.events)
+    def get_number_of_events_commands_successes_and_failures(self) :
+        total_events = len(self.events)
+        command_count = success = failure = 0
+        commands = []
+
+        for e in self.events:
+            status = e.is_command()
+            if status >= 0 :
+                command_count += 1
+                commands.append(e.normalize_command(e.message))
+            if status == 1:
+                success += 1
+            elif status == 0:
+                failure += 1
+
+        return {
+            "total_events" : total_events,
+            "command_count" : command_count,
+            "command_success" : success,
+            "command_failure" : failure,
+            "commands": commands
+        }
 
     def get_duration(self) -> float | None:
         times = [ event.get_time() for event in self.events if event.get_time() is not None ]
@@ -458,6 +494,24 @@ class ZenodoSession:
             return  None
         return (max(times) - min(times)).total_seconds()
 
+    def get_geo_data(self) : # stabilità geografica dell'attaccante (se va cambiando locazione geografica durante l'attacco)
+        """
+            0 = nessuna info
+            1 = stabile
+            >1 = VPN /proxy /botnet
+        """
+
+        countries = set()
+
+        for event in self.events:
+            geo = event.geolocation_data
+            if geo and geo.country_code2:
+                countries.add(geo.country_code2)
+
+        return {
+            "geo_variability": len(countries),
+            "countries": countries
+        }
 
     def to_dict(self):
         events_dicts = [e.to_dict() for e in self.events if e.to_dict()]
