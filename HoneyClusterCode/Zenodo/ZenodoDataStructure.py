@@ -193,12 +193,7 @@ class GeolocationData: # classe per poter manipolare i singoli
         if self.is_null():
             return None
         return drop_nulls(self.__dict__)
-    """
-    ////////////////GET INFO///////////////////
-    """
 
-    def get_continent_code(self) -> Optional[str]:
-        return self.country_code2
 
     def __str__(self):
         parts = ["GEOLOCATION:"]
@@ -465,54 +460,6 @@ class ZenodoSession:
     session_id: str
     events: List[ZenodoEvent]
 
-    def get_number_of_events_commands_successes_and_failures(self) :
-        total_events = len(self.events)
-        command_count = success = failure = 0
-        commands = []
-
-        for e in self.events:
-            status = e.is_command()
-            if status >= 0 :
-                command_count += 1
-                commands.append(e.normalize_command(e.message))
-            if status == 1:
-                success += 1
-            elif status == 0:
-                failure += 1
-
-        return {
-            "total_events" : total_events,
-            "command_count" : command_count,
-            "command_success" : success,
-            "command_failure" : failure,
-            "commands": commands
-        }
-
-    def get_duration(self) -> float | None:
-        times = [ event.get_time() for event in self.events if event.get_time() is not None ]
-        if len(times) < 2:
-            return  None
-        return (max(times) - min(times)).total_seconds()
-
-    def get_geo_data(self) : # stabilità geografica dell'attaccante (se va cambiando locazione geografica durante l'attacco)
-        """
-            0 = nessuna info
-            1 = stabile
-            >1 = VPN /proxy /botnet
-        """
-
-        countries = set()
-
-        for event in self.events:
-            geo = event.geolocation_data
-            if geo and geo.country_code2:
-                countries.add(geo.country_code2)
-
-        return {
-            "geo_variability": len(countries),
-            "countries": countries
-        }
-
     def to_dict(self):
         events_dicts = [e.to_dict() for e in self.events if e.to_dict()]
         return {self.session_id: events_dicts}
@@ -539,18 +486,6 @@ class ZenodoSession:
 class ZenodoLog:
     date_of_log: str
     sessions : List[ZenodoSession]
-    """
-        NUMERIC FEATURES
-    """
-    # TIME
-    def get_duration_of_sessions(self):
-        session_durations = []
-        for session in self.sessions:
-            session_durations.append({session.session_id : session.get_duration()})
-        return { f"{self.date_of_log}" : session_durations }
-
-    def get_average_time_between_sessions(self):
-        pass
 
     # COMMANDS
     # BEHAVIOUR
@@ -641,8 +576,6 @@ class ZenodoLog:
         print(f"Date of Log: {self.date_of_log}")
         for s in self.sessions:
             print(s)
-
-
 
 """
 ////////////////////////////////////////////////////////////////////////////////////////////
