@@ -357,19 +357,26 @@ class ZenodoEvent:
         s = cmd.strip()
         s = re.sub(r'^CMD:\s*', '', s)
 
+        # mascheramento segreti e password
         s = re.sub(r'echo\s+-e\s+"[^"]+"(\|passwd\|bash)?',
                      'echo <SECRET>|passwd', s)
         s = re.sub(r'echo\s+"[^"]+"\|passwd',
                      'echo <SECRET>|passwd', s)
 
+        # percorsi e file
         s = re.sub(r'/var/tmp/[.\w-]*\d{3,}', '/var/tmp/<FILE>', s)
         s = re.sub(r'/tmp/[.\w-]*\d{3,}', '/tmp/<FILE>', s)
         s = re.sub(r'\b[\w.-]+\.(log|txt|sh|bin|exe|tgz|gz)\b',
                      '<FILE>', s)
 
+        # networking (IP, URL)
         s = re.sub(r'(https?|ftp)://\S+', '<URL>', s)
         s = re.sub(r'\b\d{1,3}(?:\.\d{1,3}){3}\b', '<IP>', s)
 
+        # novità: maschera stringhe esadecimali lunghe (tipiche di exploit/shellcode)
+        s = re.sub(r'\b[0-9a-fA-F]{8,}\b', '<HEX>', s)
+
+        # pulizia finale spazi
         s = re.sub(r'\s+', ' ', s).strip()
         return s
 

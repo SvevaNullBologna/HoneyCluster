@@ -74,16 +74,12 @@ class HoneyClusterSession:
     def get_machine_learning_vector(self):
         return \
             [
-                self.date,
-                self.duration,
-                self.number_of_events,
-                self.number_of_commands,
-                self.number_of_successes,
-                self.number_of_failures,
-                self.geo_variability,
-                self.get_command_diversity(),
-                self.get_success_ratio(),
-                self.get_command_rate(),
-                self.get_temporal_dispersion(),
-                self.country_code
+                self.duration or 0.0, # descrive: persistenza dell'attaccante
+                self.number_of_events, # attività complessiva
+                self.number_of_commands, # interazione diretta
+                self.get_success_ratio(), # efficacia
+                self.get_command_rate(), # aggressività
+                self.geo_variability, # stabilità geografica (se siamo di fronte a qualche VPN)
+                self.get_command_diversity(), # varietà dei comandi
+                self.get_temporal_dispersion() # densità temporale
             ]
