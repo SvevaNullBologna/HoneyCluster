@@ -593,3 +593,7 @@ class ZenodoLog:
 def drop_nulls(d: dict)-> dict:
     return {k: v for k, v in d.items() if v is not None}
 
+
+def get_date(date: str) -> datetime:
+    """ yyyy-mm-dd """
+    return datetime.strptime(date, "%Y-%m-%d")

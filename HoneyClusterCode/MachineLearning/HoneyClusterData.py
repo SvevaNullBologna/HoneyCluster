@@ -1,12 +1,15 @@
 from dataclasses import dataclass
+
 from datetime import datetime
+
 
 from Zenodo.ZenodoDataStructure import ZenodoEvent
 from Zenodo.ZenodoDataStructure import ZenodoSession
 
+
 @dataclass
 class HoneyClusterSession:
-    date : datetime
+    date_of_log : datetime
     duration : float | None
     normalized_command_list : list[str] | None
     number_of_events : int
@@ -52,7 +55,6 @@ class HoneyClusterSession:
         else:
             self.duration = (max(times) - min(times)).total_seconds()
 
-
     def get_command_diversity(self):
         return len(set(self.normalized_command_list))
 
@@ -65,9 +67,9 @@ class HoneyClusterSession:
     def get_temporal_dispersion(self):
         return self.number_of_events / self.duration if self.duration else 0
 
-    def __init__(self, date_of_log : datetime, zenodosession: ZenodoSession):
-        self.date = date_of_log
-        self._set_data_from_events(zenodosession.events)
+    def __init__(self, date: datetime, zenodo_session: ZenodoSession):
+        self.date_of_log = date
+        self._set_data_from_events(zenodo_session.events)
 
 
 
@@ -83,3 +85,18 @@ class HoneyClusterSession:
                 self.get_command_diversity(), # varietà dei comandi
                 self.get_temporal_dispersion() # densità temporale
             ]
+
+    def to_feature_dict(self) -> dict:
+        return {
+            "duration": self.duration or 0.0,
+            "n_events": self.number_of_events,
+            "n_commands": self.number_of_commands,
+            "success_ratio": self.get_success_ratio(),
+            "command_rate": self.get_command_rate(),
+            "geo_variability": self.geo_variability,
+            "command_diversity": self.get_command_diversity(),
+            "temporal_dispersion": self.get_temporal_dispersion()
+        }
+
+
+
