@@ -3,8 +3,17 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
-from Zenodo.ZenodoDataStructure import ZenodoEvent
-from Zenodo.ZenodoDataStructure import ZenodoSession
+"""
+DALLA CONSEGNA:
+
+Implementation Guidance
+● Extract temporal features: inter-command timing, session duration,
+time-of-day patterns
+● Command-based features: unique commands ratio, command diversity, tool
+signatures
+● Behavioral patterns: reconnaissance vs. exploitation ratio, error rate,
+command correction attempts
+
 
 
 @dataclass
@@ -100,3 +109,4 @@ class HoneyClusterSession:
 
 
 
+"""

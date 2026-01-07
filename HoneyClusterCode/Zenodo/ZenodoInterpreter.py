@@ -4,6 +4,8 @@ from pathlib import Path
 import gzip
 import json
 import ijson
+import re
+from datetime import datetime
 
 
 """
@@ -33,109 +35,119 @@ import ijson
 """
 
 
-def _clean_geolocation(geo:dict) -> dict | None:
-    if not geo:
-        return None
-    geo_clean = {k: float(v) if type(v).__name__ == "Decimal" else v for k,v in geo.items() if v is not None}
-    return geo_clean if geo_clean else None
+def set_working_folder(zenodo_local_path: Path):
+    if not _check_directory(zenodo_local_path / "original", False):
+        logging.error("no downloaded dataset directory found. Check path and try again")
+        raise NotADirectoryError("no downloaded dataset directory found. Check path and try again")
+    raw_path = zenodo_local_path / "original"
+    _check_directory(zenodo_local_path / "cleaned", True)
+    clean_path = zenodo_local_path / "cleaned"
+    return raw_path, clean_path
 
 
-def _parse_date_from_filename(filename:str) -> str:
-    return filename.removesuffix(".gz").removeprefix("cyberlab_")
+def extract_and_clean_all_zenodo_logs_in_folder(originals_path: Path, cleaned_path: Path) -> bool:
+    completed = False
+    for filename in originals_path.glob("*.json.gz"):
+        completed &= clean_zenodo_gz(filename, cleaned_path)
+    return completed
 
 
-def _clean_event(e:dict) -> dict | None:
-    if not e.get("eventid"):
-        return None
+def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
+    log_date = parse_date_from_gz_filename(gz_path.name)
+    out_file = (cleaned_path / log_date).with_suffix(".json")
 
-    cleaned = {}
-    for k,v in e.items():
-        if k == "session_id":
-            continue
-        if v is not None:
-            if type(v).__name__ == "Decimal":
-                v = float(v)
-            cleaned[k] = v
-    return cleaned
+    if out_file.exists():
+        logging.info(f"skipping {log_date}. It has already been cleaned")
+        return True
 
+    try:
+        logging.info(f"cleaning {log_date} to {out_file}")
 
-class ZenodoInterpreter:
-    def __init__(self, zenodo_local_path: Path):
-        logging.info("Zenodo Interpreter started.")
-        if not check_directory(zenodo_local_path / "original", False):
-            logging.error("no downloaded dataset directory found. Check path and try again")
-            raise NotADirectoryError("no downloaded dataset directory found. Check path and try again")
-        self.originals = zenodo_local_path / "original"
-        check_directory(zenodo_local_path / "cleaned", True)
-        self.cleaned = zenodo_local_path / "cleaned"
+        with gzip.open(gz_path, "rb") as f, open(out_file, "w", encoding="utf-8") as out:
+            # 1. Inizio del documento
+            out.write('{\n')
+            out.write(f'  "date": "{log_date}",\n')
+            out.write('  "sessions": {')  # Apro l'oggetto sessions
 
-    def extract_and_clean_all_zenodo_logs_in_folder(self) -> bool:
-        completed = False
-        for filename in self.originals.glob("*.json.gz"):
-            completed &= self._clean_zenodo_gz(filename)
-        return completed
+            first_session = True
 
-    def _clean_zenodo_gz(self, gz_path: Path) -> bool:
-        log_date = _parse_date_from_filename(gz_path.name)
-        out_file = (self.cleaned / log_date).with_suffix(".json")
-
-        if out_file.exists():
-            logging.info(f"skipping {log_date}. It has already been cleaned")
-            return True
-
-        try:
-            logging.info(f"cleaning {log_date} to {out_file}")
-            with gzip.open(gz_path, "rb") as f, open(out_file, "w", encoding="utf-8") as out:
-
-                out.write('{\n')
-                out.write(f'    "date": "{log_date}",\n')
-                out.write(' "sessions": [\n')
-
-                first_session = True
-                for session in ijson.items(f, "item"):
-                    session_id, events = next(iter(session.items()))
+            # ijson.items legge un generatore, quindi la RAM resta bassa
+            for session in ijson.items(f, "item"):
+                for session_id, events in session.items():
                     cleaned_events = []
 
                     for e in events:
-                        cleaned = _clean_event(e)
-                        if not cleaned:
+                        ce = _clean_event(e)
+                        if not ce:
                             continue
 
-                        #pulizia geolocation_data
-                        geo = cleaned.get("geolocation_data")
-                        geo_clean = _clean_geolocation(geo)
-
-                        if geo_clean:
-                            cleaned["geolocation_data"] = geo_clean
+                        geo = _clean_geolocation(ce.get("geolocation_data"))
+                        if geo:
+                            ce["geolocation_data"] = geo
                         else:
-                            cleaned.pop("geolocation_data", None)
+                            ce.pop("geolocation_data", None)
 
-                        cleaned_events.append(cleaned)
+                        cleaned_events.append(ce)
 
                     if not cleaned_events:
                         continue
 
+                    # 2. Gestione della virgola tra le chiavi di "sessions"
                     if not first_session:
-                        out.write(",\n")
+                        out.write(",")
+
+                    out.write(f'\n    "{session_id}": ')
+                    # dumpiamo solo la lista di eventi di UNA sessione alla volta
+                    json.dump(cleaned_events, out, ensure_ascii=False, default=float)
 
                     first_session = False
 
-                    json.dump({session_id: cleaned_events}, out, ensure_ascii=False, default=float)
+            # 3. Chiusura della struttura (fondamentale!)
+            out.write('\n  }\n}')
 
-                out.write("\n   ]\n}")
-                return True
+        return True
+
+    except Exception as e:
+        logging.error(f"error cleaning {gz_path.name}: {e}")
+        # Se fallisce, rimuoviamo il file parziale per evitare corruzioni al prossimo avvio
+        if out_file.exists():
+            out_file.unlink()
+        return False
+
+def get_zenodo_log_list(cleaned_path: Path):
+    logging.info("getting Zenodo log list")
+
+    logs = []
+
+    for file in cleaned_path.glob("*json"):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                # "sessions" è un oggetto, vogliamo leggere session_id -> eventi
+                sessions = {}
+                parser = ijson.kvitems(f, "sessions")  # legge le coppie chiave-valore
+                for session_id, events in parser:
+                    sessions[session_id] = events  # events è già lista di dizionari
+                logs.append({
+                    "date": parse_date_from_json_filename(file.name),
+                    "sessions": sessions
+                })
         except Exception as e:
-            logging.error(f"error cleaning {gz_path.name}: {e}")
-            return False
+            logging.error(f"Error reading cleaned log {file.name}: {e}")
+
+    return logs
+
+def clean_zenodo_dataset(zenodo_folder: Path):
+    originals, cleaned = set_working_folder(zenodo_folder)
+
+    extract_and_clean_all_zenodo_logs_in_folder(originals, cleaned)
 
 
 """
-////////////////////////////////////////////////////////////////////////////////////////////
-                                    UTILS
-////////////////////////////////////////////////////////////////////////////////////////////
+    PRIVATE FUNCTION FOR USAGE PURPOSE
+
 """
 
-def check_directory(path: Path | None, creation: bool) -> bool:
+def _check_directory(path: Path | None, creation: bool) -> bool:
     if not path:
         logging.error("Path cannot be empty")
         return False
@@ -149,3 +161,177 @@ def check_directory(path: Path | None, creation: bool) -> bool:
     else:
         logging.info(f"Directory valida: {path}")
         return True
+
+
+def _clean_event(e:dict) -> dict | None: # elimina i None, converte i Decimal in Float ed elimina session id che è già usato come chiave
+    if not e.get("eventid"):
+        return None
+
+    cleaned = {}
+
+    keep_keys = {"eventid", "timestamp", "message", "geolocation_data"}
+    for k,v in e.items():
+        if k in keep_keys and v is not None:
+            cleaned[k] = _convert_decimals(v)
+    return cleaned
+
+def _clean_geolocation(geo:dict) -> dict | None: # mantiene solo campi validi e converte Decimal -> float
+    if not geo:
+        return None
+
+    keep_keys = {"country_name", "city_name", "latitude", "longitude"}
+    geo_clean = {k: float(v) if type(v).__name__ == "Decimal" else v for k,v in geo.items() if k in keep_keys and v is not None}
+    return geo_clean if geo_clean else None
+
+def _convert_decimals(obj):
+    if isinstance(obj, dict):
+        return {k: _convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_decimals(i) for i in obj]
+    elif type(obj).__name__ == "Decimal":
+        return float(obj)
+    else:
+        return obj
+
+def parse_date_from_gz_filename(filename:str) -> str:
+    return filename.removesuffix(".gz").removeprefix("cyberlab_")
+
+"""
+////////////////////////////////////////////////////////////////////////////////////////////
+                                    UTILITIES 
+////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+
+
+def get_time(timestamp: str) -> datetime | None:
+    """ nel json "timestamp": "2019-05-18T00:00:16.582846Z" """
+    if not timestamp:
+        logging.error("empty timestamp")
+        return None
+    try:
+        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        return dt
+    except ValueError:
+        logging.warning(f"Invalid timestamp: {timestamp}")
+        return None
+
+def is_command(self) -> int:
+    """
+    -1 = not a command
+    0 = command failure
+    1 = command success
+    2 = command input / unknown
+    """
+
+    if not self.eventid.startswith("cowrie.command"):
+        return -1
+    if self.eventid.endswith("success"):
+        return 1
+    if self.eventid.endswith("failure"):
+        return 0
+    return 2
+
+def normalize_command(cmd: str) -> str:
+    s = cmd.strip()
+    s = re.sub(r'^CMD:\s*', '', s)
+
+    # mascheramento segreti e password
+    s = re.sub(r'echo\s+-e\s+"[^"]+"(\|passwd\|bash)?',
+                 'echo <SECRET>|passwd', s)
+    s = re.sub(r'echo\s+"[^"]+"\|passwd',
+                 'echo <SECRET>|passwd', s)
+
+    # percorsi e file
+    s = re.sub(r'/var/tmp/[.\w-]*\d{3,}', '/var/tmp/<FILE>', s)
+    s = re.sub(r'/tmp/[.\w-]*\d{3,}', '/tmp/<FILE>', s)
+    s = re.sub(r'\b[\w.-]+\.(log|txt|sh|bin|exe|tgz|gz)\b',
+                 '<FILE>', s)
+
+    # networking (IP, URL)
+    s = re.sub(r'(https?|ftp)://\S+', '<URL>', s)
+    s = re.sub(r'\b\d{1,3}(?:\.\d{1,3}){3}\b', '<IP>', s)
+
+    # novità: maschera stringhe esadecimali lunghe (tipiche di exploit/shellcode)
+    s = re.sub(r'\b[0-9a-fA-F]{8,}\b', '<HEX>', s)
+
+    # pulizia finale spazi
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+def extract_command(self) -> str | None:
+    if not self.message:
+        logging.error("no valid message")
+        return None
+    if self.is_command() == -1:
+        logging.error("invalid command")
+        return None
+    return self.normalize_command(self.message)
+
+
+
+
+def parse_date_from_json_filename(filename: str) -> str: # es: cyberlab_2019-05-13.json -> 2019-05-13
+    filename = filename.removesuffix(".json")
+    return filename.removeprefix("cyberlab_")
+
+def get_date_from_string(date: str, pattern: str ="%Y-%m-%d") -> datetime:
+    """ yyyy-mm-dd """
+    return datetime.strptime(date, pattern)
+
+def drop_nulls(d: dict)-> dict:
+    return {k: v for k, v in d.items() if v is not None}
+
+
+
+
+"""
+
+"""
+
+
+if __name__ == "__main__":
+    clean_zenodo_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
+
+
+
+"""
+            with gzip.open(gz_path, "rb") as f: # apriamo il gz compresso che contiene il json
+
+            for session in ijson.items(f, "item"): # leggiamo il json usando ijson, un parser incrementale che EVITA DI CARICARE TUTTO IN RAM
+                                                   # ogni session è un dizionario che contiene tanti eventi
+                session_id, events = next(iter(session.items()))  # estrae il session_id e la lista di eventi
+
+                cleaned_events = []
+
+                for e in events:
+                    cleaned_event = _clean_event(e)  # pulisce l'evento
+                    if not cleaned_event: # se restituisce None viene scartato
+                        continue
+
+                    geo_clean = _clean_geolocation(cleaned_event.get("geolocation_data")) # pulisce i dati riguardanti la geolocalizzazione
+
+                    if geo_clean:
+                        cleaned_event["geolocation_data"] = geo_clean
+                    else: # se la pulizia della geolocalizzazione non mantiene campi validi, viene rimosso direttamente
+                        cleaned_event.pop("geolocation_data", None)
+
+                    cleaned_events.append(cleaned_event) # contiene a questo punto tutti gli eventi validi della sessione
+
+                if cleaned_events: # se gli eventi puliti non sono nulli, li salviamo
+                    sessions_out[session_id] = cleaned_events
+
+        # abbiamo quindi recuperato tutti i dati, a questo punto scriviamo il json pulito
+        
+                with open(out_file, "w", encoding="utf-8") as out:
+            json.dump(
+                {
+                    "date": log_date,
+                    "sessions": _convert_decimals(sessions_out)
+                },
+                out,
+                ensure_ascii=False
+            )
+
+"""
+
