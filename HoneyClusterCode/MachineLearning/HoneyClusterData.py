@@ -35,7 +35,11 @@ class HoneyClusterData:
     error_rate: float # comandi errati / comandi
     command_correction_attempts: int # quante volte in media l'attaccante cerca di correggersi
 
-
+"""
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                PROCESSING DATASET INTO USEFUL DATAS
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+"""
 def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 500):
     """
         {
@@ -116,6 +120,22 @@ def _save_chunk(data_list: list, file_path: Path):
         df_chunk.to_parquet(file_path, engine='fastparquet')
     else:
         df_chunk.to_parquet(file_path, engine='fastparquet', append=True)
+
+
+
+def read_parquet(output_path: Path):
+    if not output_path.exists():
+        print("Il file non esiste ancora.")
+        return pd.DataFrame()
+
+        # Usiamo lo stesso engine usato per la scrittura
+    return pd.read_parquet(output_path, engine='fastparquet')
+
+"""
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                EXTRACTING FEATURES
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+"""
 """
     EXTRACT TEMPORAL FEATURES
 """
@@ -132,14 +152,11 @@ def get_inter_command_timing(command_times: list[datetime] = None) -> float:
 
     return sum(deltas) / len(deltas) # restituisce la media
 
-
-
 def get_session_duration(times: list[datetime] = None) -> float:
     """ durata totale della sessione in secondi """
     if not times or len(times) < 2:
         return 0.0
     return (max(times) - min(times)).total_seconds()
-
 
 def get_time_of_day_patterns(times: list[datetime] = None) -> float:
     """ otteniamo l'abitudine oraria dell'attaccante """
@@ -154,6 +171,34 @@ def get_time_of_day_patterns(times: list[datetime] = None) -> float:
 """
     EXTRACT COMMAND BASED FEATURES
 """
+_COMMAND_FAMILIES = {
+    "filesystem_recon":{
+        "ls", "cd", "cat", "which"
+    },
+    "system_recon":{
+        "uname", "lscpu", "free", "top", "w"
+    },
+    "file_manipulation":{
+        "rm", "dd"
+    },
+    "execution":{
+        "sh", "shell", "system", "enable", "sleep"
+    },
+    "persistence":{
+        "crontab"
+    },
+    "interaction":{
+        "echo"
+    }
+}
+
+_SIGNATURES = {
+        'scanning': {'nmap', 'netstat', 'ifconfig', 'arp', 'route', 'ping'},
+        'download': {'wget', 'curl', 'tftp', 'ftp', 'scp'},
+        'priv_esc': {'sudo', 'chmod', 'chown', 'su', 'visudo'},
+        'discovery': {'whoami', 'id', 'uname', 'pwd', 'cat /etc/passwd'},
+        'cleanup': {'history -c', 'rm -rf', 'unset HISTFILE'}
+}
 
 def get_unique_commands_ratio(commands: list[str] = None)-> float:
     if not commands: # non abbiamo informazioni
@@ -198,14 +243,6 @@ def get_command_correction_attempts(eventids: list[str] = None, commands: list[s
     return 9
 """
 """
-
-def read_parquet(result_path: Path):
-    if not result_path.exists():
-        print("Il file non esiste ancora.")
-        return pd.DataFrame()
-
-        # Usiamo lo stesso engine usato per la scrittura
-    return pd.read_parquet(result_path, engine='fastparquet')
 
 
 if __name__ == "__main__":
