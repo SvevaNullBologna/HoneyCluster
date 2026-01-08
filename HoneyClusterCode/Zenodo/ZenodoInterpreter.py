@@ -35,6 +35,8 @@ from datetime import datetime
 """
 
 
+
+
 def set_working_folder(zenodo_local_path: Path):
     if not _check_directory(zenodo_local_path / "original", False):
         logging.error("no downloaded dataset directory found. Check path and try again")
@@ -80,12 +82,6 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
                         ce = _clean_event(e)
                         if not ce:
                             continue
-
-                        geo = _clean_geolocation(ce.get("geolocation_data"))
-                        if geo:
-                            ce["geolocation_data"] = geo
-                        else:
-                            ce.pop("geolocation_data", None)
 
                         cleaned_events.append(ce)
 
@@ -163,16 +159,35 @@ def _check_directory(path: Path | None, creation: bool) -> bool:
         return True
 
 
-def _clean_event(e:dict) -> dict | None: # elimina i None, converte i Decimal in Float ed elimina session id che è già usato come chiave
-    if not e.get("eventid"):
+def _clean_event(e:dict, add_geolocation: bool = False) -> dict | None: # elimina i None, converte i Decimal in Float ed elimina session id che è già usato come chiave
+    eventid = e.get("eventid")
+    if not eventid:
         return None
 
-    cleaned = {}
+    cleaned = {
+       "eventid": eventid
+    }
 
-    keep_keys = {"eventid", "timestamp", "message", "geolocation_data"}
-    for k,v in e.items():
-        if k in keep_keys and v is not None:
-            cleaned[k] = _convert_decimals(v)
+    #timestamp sempre utile (timing, inter-command time)
+    if e.get("timestamp") is not None:
+        cleaned["timestamp"] = _convert_decimals(e["timestamp"])
+
+    #message solo se è un comando
+    if is_command(eventid) != -1:
+        msg = e.get("message")
+        if msg:
+            msg = _isolate_command(msg)
+            cleaned["message"] = _convert_decimals(msg)
+
+
+    #geolocalizzazione opzionale
+    if add_geolocation:
+        geo = e.get("geolocation_data")
+        if geo:
+            geo_clean = _clean_geolocation(geo)
+            if geo_clean:
+                cleaned["geolocation_data"] = geo_clean
+
     return cleaned
 
 def _clean_geolocation(geo:dict) -> dict | None: # mantiene solo campi validi e converte Decimal -> float
@@ -194,7 +209,7 @@ def _convert_decimals(obj):
         return obj
 
 def parse_date_from_gz_filename(filename:str) -> str:
-    return filename.removesuffix(".gz").removeprefix("cyberlab_")
+    return filename.removesuffix(".json.gz").removeprefix("cyberlab_")
 
 """
 ////////////////////////////////////////////////////////////////////////////////////////////
@@ -216,7 +231,7 @@ def get_time(timestamp: str) -> datetime | None:
         logging.warning(f"Invalid timestamp: {timestamp}")
         return None
 
-def is_command(self) -> int:
+def is_command(eventid: str) -> int:
     """
     -1 = not a command
     0 = command failure
@@ -224,51 +239,27 @@ def is_command(self) -> int:
     2 = command input / unknown
     """
 
-    if not self.eventid.startswith("cowrie.command"):
+    if not eventid.startswith("cowrie.command"):
         return -1
-    if self.eventid.endswith("success"):
+    if eventid.endswith("success"):
         return 1
-    if self.eventid.endswith("failure"):
+    if eventid.endswith("failure"):
         return 0
     return 2
 
-def normalize_command(cmd: str) -> str:
-    s = cmd.strip()
-    s = re.sub(r'^CMD:\s*', '', s)
-
-    # mascheramento segreti e password
-    s = re.sub(r'echo\s+-e\s+"[^"]+"(\|passwd\|bash)?',
-                 'echo <SECRET>|passwd', s)
-    s = re.sub(r'echo\s+"[^"]+"\|passwd',
-                 'echo <SECRET>|passwd', s)
-
-    # percorsi e file
-    s = re.sub(r'/var/tmp/[.\w-]*\d{3,}', '/var/tmp/<FILE>', s)
-    s = re.sub(r'/tmp/[.\w-]*\d{3,}', '/tmp/<FILE>', s)
-    s = re.sub(r'\b[\w.-]+\.(log|txt|sh|bin|exe|tgz|gz)\b',
-                 '<FILE>', s)
-
-    # networking (IP, URL)
-    s = re.sub(r'(https?|ftp)://\S+', '<URL>', s)
-    s = re.sub(r'\b\d{1,3}(?:\.\d{1,3}){3}\b', '<IP>', s)
-
-    # novità: maschera stringhe esadecimali lunghe (tipiche di exploit/shellcode)
-    s = re.sub(r'\b[0-9a-fA-F]{8,}\b', '<HEX>', s)
-
-    # pulizia finale spazi
-    s = re.sub(r'\s+', ' ', s).strip()
+def _isolate_command(message: str) -> str:
+    s = message.strip()
+    s = re.sub(r'^Command found:\s*', '', s, flags=re.IGNORECASE)
     return s
 
-def extract_command(self) -> str | None:
-    if not self.message:
-        logging.error("no valid message")
+def extract_command(message: str, eventid: str) -> str | None:
+    if not message:
+        # logging.error("no valid message")
         return None
-    if self.is_command() == -1:
-        logging.error("invalid command")
+    if is_command(eventid) == -1:
+        # logging.error("invalid command")
         return None
-    return self.normalize_command(self.message)
-
-
+    return _isolate_command(message)
 
 
 def parse_date_from_json_filename(filename: str) -> str: # es: cyberlab_2019-05-13.json -> 2019-05-13
@@ -282,12 +273,6 @@ def get_date_from_string(date: str, pattern: str ="%Y-%m-%d") -> datetime:
 def drop_nulls(d: dict)-> dict:
     return {k: v for k, v in d.items() if v is not None}
 
-
-
-
-"""
-
-"""
 
 
 if __name__ == "__main__":

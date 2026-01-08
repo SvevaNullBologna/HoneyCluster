@@ -6,7 +6,7 @@ from sklearn.cluster import DBSCAN
 
 import pandas as pd
 
-from MachineLearning.HoneyClusterData import HoneyClusterSession
+# from MachineLearning.HoneyClusterData import HoneyClusterSession
 
 
 import joblib # per salvare lo scaler per poterlo riutilizzare

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-
+from pathlib import Path
+import pandas as pd
 from datetime import datetime
-
 
 """
 DALLA CONSEGNA:
@@ -13,20 +13,69 @@ time-of-day patterns
 signatures
 ● Behavioral patterns: reconnaissance vs. exploitation ratio, error rate,
 command correction attempts
-
-
+"""
 
 @dataclass
-class HoneyClusterSession:
-    date_of_log : datetime
-    duration : float | None
-    normalized_command_list : list[str] | None
-    number_of_events : int
-    number_of_commands : int
-    number_of_successes : int
-    number_of_failures : int
-    geo_variability : int
-    country_code : str | None
+class HoneyClusterData:
+    # temporal features
+    inter_command_timing : float    # tempo che passa tra i comandi inviati
+    session_duration: float     # durata della sessione
+    time_of_day_patterns: float # codifica dell'abitudine temporale
+    # command based features
+    unique_commands_ratio : float
+    command_diversity_ratio : float
+    tool_signatures : float # presenza di famiglie di comandi per esempio: scanning -> nmap, ifconfig, netstat ; download -> wget, curl ; privilege escalation -> sudo, chmod
+    # behavioral patterns
+    reconnaissance_on_exploitation_ratio: float # da comprendere
+    error_rate: float
+    command_correction_attempts: int
+
+
+def get_info_from_json(json_folder_path: Path) -> pd.DataFrame:
+    pass
+
+"""
+    EXTRACT TEMPORAL FEATURES
+"""
+
+def get_inter_command_timing(command_times: list[datetime]) -> float:
+    pass
+
+def get_session_duration(times: list[datetime]) -> float:
+    pass
+
+def get_time_of_day_patterns(times: list[datetime]) -> float:
+    pass
+
+"""
+    EXTRACT COMMAND BASED FEATURES
+"""
+
+def get_unique_commands_ratio(commands: list[str])-> float:
+    pass
+
+def get_command_diversity_ratio(commands: list[str])-> float:
+    pass
+
+def get_tool_signatures(commands: list[str])-> float:
+    pass
+
+"""
+    EXTRACT BEHAVIORAL PATTERNS 
+"""
+
+def get_reconnaissance_on_exploitation_ratio(eventids : list[str])-> float:
+    pass
+
+def get_error_rate(eventids: list[str], commands: list[str])-> float:
+    pass
+
+def get_command_correction_attempts(eventids: list[str], commands: list[str])-> float:
+    pass
+
+
+
+"""
 
     def _set_data_from_events(self, events : list[ZenodoEvent]) :
         self.number_of_events = len(events)
