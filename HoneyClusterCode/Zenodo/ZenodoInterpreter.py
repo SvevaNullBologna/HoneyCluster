@@ -68,7 +68,6 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
         with gzip.open(gz_path, "rb") as f, open(out_file, "w", encoding="utf-8") as out:
             # 1. Inizio del documento
             out.write('{\n')
-            out.write(f'  "date": "{log_date}",\n')
             out.write('  "sessions": {')  # Apro l'oggetto sessions
 
             first_session = True
@@ -250,6 +249,8 @@ def is_command(eventid: str) -> int:
 def _isolate_command(message: str) -> str:
     s = message.strip()
     s = re.sub(r'^Command found:\s*', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'^CMD:\s*', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'^Command not found:\s*', '', s, flags=re.IGNORECASE)
     return s
 
 def extract_command(message: str, eventid: str) -> str | None:
@@ -278,45 +279,4 @@ def drop_nulls(d: dict)-> dict:
 if __name__ == "__main__":
     clean_zenodo_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
 
-
-
-"""
-            with gzip.open(gz_path, "rb") as f: # apriamo il gz compresso che contiene il json
-
-            for session in ijson.items(f, "item"): # leggiamo il json usando ijson, un parser incrementale che EVITA DI CARICARE TUTTO IN RAM
-                                                   # ogni session è un dizionario che contiene tanti eventi
-                session_id, events = next(iter(session.items()))  # estrae il session_id e la lista di eventi
-
-                cleaned_events = []
-
-                for e in events:
-                    cleaned_event = _clean_event(e)  # pulisce l'evento
-                    if not cleaned_event: # se restituisce None viene scartato
-                        continue
-
-                    geo_clean = _clean_geolocation(cleaned_event.get("geolocation_data")) # pulisce i dati riguardanti la geolocalizzazione
-
-                    if geo_clean:
-                        cleaned_event["geolocation_data"] = geo_clean
-                    else: # se la pulizia della geolocalizzazione non mantiene campi validi, viene rimosso direttamente
-                        cleaned_event.pop("geolocation_data", None)
-
-                    cleaned_events.append(cleaned_event) # contiene a questo punto tutti gli eventi validi della sessione
-
-                if cleaned_events: # se gli eventi puliti non sono nulli, li salviamo
-                    sessions_out[session_id] = cleaned_events
-
-        # abbiamo quindi recuperato tutti i dati, a questo punto scriviamo il json pulito
-        
-                with open(out_file, "w", encoding="utf-8") as out:
-            json.dump(
-                {
-                    "date": log_date,
-                    "sessions": _convert_decimals(sessions_out)
-                },
-                out,
-                ensure_ascii=False
-            )
-
-"""
 
