@@ -1,5 +1,7 @@
+import logging
 import os
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import ijson
@@ -40,7 +42,7 @@ class HoneyClusterData:
                 PROCESSING DATASET INTO USEFUL DATAS
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 """
-def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 500):
+def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 500): # * vedi spiegazione sul formato parquet in documenti
     """
         {
             "sessions": {
@@ -66,7 +68,7 @@ def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 
 
         for session_id, events in parser:
             # estrazione immediata dei dati necessari dalla sessione corrente
-            timestamps, commands, eventids = [], [], []
+            timestamps, commands, verbs, statuses = [], [], [], []
 
             for event in events:
                 # estraiamo i cambi base
@@ -77,25 +79,26 @@ def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 
                 # molto più veloce di pd.to_datetime
                 ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
 
-                eventids.append(eid)
+                statuses.append(is_command(eid))
                 timestamps.append(ts)
                 if msg:
                     commands.append(msg)
+                    verbs.append(_get_verb_of_command(msg))
 
             if not timestamps:
                 continue
 
             # qui posso già calcolare i valori voluti in HoneyClusterData:
             data_obj = HoneyClusterData(
-                inter_command_timing=get_inter_command_timing(timestamps),
-                session_duration=get_session_duration(timestamps),
-                time_of_day_patterns=get_time_of_day_patterns(timestamps),
-                unique_commands_ratio=get_unique_commands_ratio(commands),
-                command_diversity_ratio=get_command_diversity_ratio(commands),
-                tool_signatures=get_tool_signatures(commands),
-                reconnaissance_vs_exploitation_ratio=get_reconnaissance_on_exploitation_ratio(eventids),
-                error_rate=get_error_rate(eventids),
-                command_correction_attempts = get_command_correction_attempts(eventids, commands)
+                inter_command_timing=_get_inter_command_timing(timestamps),
+                session_duration=_get_session_duration(timestamps),
+                time_of_day_patterns=_get_time_of_day_patterns(timestamps),
+                unique_commands_ratio=_get_unique_commands_ratio(commands),
+                command_diversity_ratio=_get_command_diversity_ratio(verbs),
+                tool_signatures=_get_tool_signatures(verbs),
+                reconnaissance_vs_exploitation_ratio=_get_reconnaissance_vs_exploitation_ratio(verbs),
+                error_rate=_get_error_rate(statuses),
+                command_correction_attempts =_get_command_correction_attempts(statuses, commands)
             )
 
             row = data_obj.__dict__
@@ -121,16 +124,6 @@ def _save_chunk(data_list: list, file_path: Path):
     else:
         df_chunk.to_parquet(file_path, engine='fastparquet', append=True)
 
-
-
-def read_parquet(output_path: Path):
-    if not output_path.exists():
-        print("Il file non esiste ancora.")
-        return pd.DataFrame()
-
-        # Usiamo lo stesso engine usato per la scrittura
-    return pd.read_parquet(output_path, engine='fastparquet')
-
 """
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
                 EXTRACTING FEATURES
@@ -140,7 +133,7 @@ def read_parquet(output_path: Path):
     EXTRACT TEMPORAL FEATURES
 """
 
-def get_inter_command_timing(command_times: list[datetime] = None) -> float:
+def _get_inter_command_timing(command_times: list[datetime] = None) -> float:
     """ otteniamo il tempo medio tra un comando e l'altro """
     if not command_times or len(command_times) < 2:
         return 0.0 # non abbiamo informazioni
@@ -152,13 +145,13 @@ def get_inter_command_timing(command_times: list[datetime] = None) -> float:
 
     return sum(deltas) / len(deltas) # restituisce la media
 
-def get_session_duration(times: list[datetime] = None) -> float:
+def _get_session_duration(times: list[datetime] = None) -> float:
     """ durata totale della sessione in secondi """
     if not times or len(times) < 2:
         return 0.0
     return (max(times) - min(times)).total_seconds()
 
-def get_time_of_day_patterns(times: list[datetime] = None) -> float:
+def _get_time_of_day_patterns(times: list[datetime] = None) -> float:
     """ otteniamo l'abitudine oraria dell'attaccante """
     if not times: # se non abbiamo informazioni
         return 0.0
@@ -171,26 +164,7 @@ def get_time_of_day_patterns(times: list[datetime] = None) -> float:
 """
     EXTRACT COMMAND BASED FEATURES
 """
-_COMMAND_FAMILIES = {
-    "filesystem_recon":{
-        "ls", "cd", "cat", "which"
-    },
-    "system_recon":{
-        "uname", "lscpu", "free", "top", "w"
-    },
-    "file_manipulation":{
-        "rm", "dd"
-    },
-    "execution":{
-        "sh", "shell", "system", "enable", "sleep"
-    },
-    "persistence":{
-        "crontab"
-    },
-    "interaction":{
-        "echo"
-    }
-}
+
 
 _SIGNATURES = {
         'scanning': {'nmap', 'netstat', 'ifconfig', 'arp', 'route', 'ping'},
@@ -200,53 +174,170 @@ _SIGNATURES = {
         'cleanup': {'history -c', 'rm -rf', 'unset HISTFILE'}
 }
 
-def get_unique_commands_ratio(commands: list[str] = None)-> float:
+def _get_unique_commands_ratio(commands: list[str] = None)-> float:
     if not commands: # non abbiamo informazioni
         return 0.0
-    return 4
+    return len(set(commands)) / len(commands) # quanti comandi unici ci sono sul loro totale. Qui non si considerano gli errori nella scrittura dei comandi ma il 'movimento'
 
-def get_command_diversity_ratio(commands: list[str] = None)-> float:
-    if not commands:
+def _get_command_diversity_ratio(verbs: list[str] = None)-> float:
+    """ quanti strumenti diversi conosce l'attaccante """
+    if not verbs:
         return 0.0
-    return 5
 
-def get_tool_signatures(commands: list[str] = None)-> float:
-    if not commands:
+    return len(set(verbs))/len(verbs)
+
+
+_BEHAVIORAL_MAP = {
+    "reconnaissance": {
+        "file_system": {"ls", "cd", "pwd", "which", "find", "du", "stat"},
+        "file_reading": {"cat", "head", "tail", "more", "less"},
+        "system_info": {"uname", "lscpu", "free", "uptime", "hostname", "df"},
+        "user_info": {"whoami", "id", "groups", "last", "w"},
+        "processes_env": {"ps", "top", "env", "history", "export", "alias"},
+        "network": {"ifconfig", "netstat", "ip", "route", "arp", "ping"}
+    },
+    "exploitation": {
+        "malware_download": {"wget", "curl", "tftp", "ftp", "scp", "sftp"},
+        "priv_esc": {"chmod", "chown", "sudo", "su", "visudo"},
+        "scripting_exec": {"sh", "bash", "python", "python3", "perl", "php", "gcc", "make"},
+        "persistence_mod": {"crontab", "mkdir", "touch", "echo", "rm", "mv", "cp", "ln"},
+        "defense_evasion": {"pkill", "kill", "killall", "unset", "iptables", "ufw"}
+    }
+
+
+}
+
+
+def _get_tool_signatures(verbs: list[str] = None)-> float:
+    """ conta quante sotto-categorie (firme) diverse sono state attivate """
+    if not verbs:
         return 0.0
-    return 6
+
+    found_signatures = set()
+    verbs_set = set(verbs) #per ricerca veloce, così non ci ripetiamo
+
+    # Cicliamo su Recon e Exploitation
+    for macro_category in _BEHAVIORAL_MAP.values():
+        # Cicliamo sulle sotto-categorie (es. file_system, network, priv_esc...)
+        for signature_name, signature_verbs in macro_category.items():
+            # Se l'attaccante ha usato almeno un verbo di questa firma
+            if any(v in verbs_set for v in signature_verbs):
+                found_signatures.add(signature_name)
+
+
+    return float(len(found_signatures))
 
 """
     EXTRACT BEHAVIORAL PATTERNS 
 """
 
-def get_reconnaissance_on_exploitation_ratio(eventids : list[str] = None)-> float:
-    return 7
-
-def get_error_rate(eventids: list[str] = None)-> float:
-    if not eventids:
+def _get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
+    """ calcola il rapporto tra verbi di ricerca e verbi di attacco """
+    if not verbs:
         return 0.0
 
-    command_statuses = [status for eid in eventids if (status := is_command(eid)) != -1]
+    all_recon = set().union(*_BEHAVIORAL_MAP["reconnaissance"].values() )
+    all_exploit = set().union(*_BEHAVIORAL_MAP["exploitation"].values() )
 
-    if not command_statuses:
+    recon_count = sum(1 for v in verbs if v in all_recon)
+    exploit_count = sum(1 for v in verbs if v in all_exploit)
+
+    if exploit_count == 0: # se non c'è exploitation, il rapporto è basato solo sulla recon
+        return float(recon_count)
+
+    return recon_count / exploit_count
+
+
+def _get_error_rate(statuses: list[int] = None)-> float:
+    if not statuses:
         return 0.0
 
-    return command_statuses.count(0) / len(command_statuses)
+    return statuses.count(0) / len(statuses)
 
 
-def get_command_correction_attempts(eventids: list[str] = None, commands: list[str] = None)-> int:
-    if not eventids:
+def _get_command_correction_attempts(statuses: list[str] = None, commands: list[str] = None)-> int:
+
+    cmd_statuses = [s for s in statuses if s != -1] # la lunghezza dovrebbe matchare quella della lista dei comandi
+
+    if len(commands) < 2 or len (cmd_statuses) != len(commands) :
         return 0
 
+    corrections = 0
+    for i in range(1, len(commands)):
+        if cmd_statuses[i-1] == 0 :
+            # calcoliamo quanto il comando attuale è simile al precedente
+            similarity = SequenceMatcher(None, commands[i-1], commands[i]).ratio()
 
-    
-    return 9
+            if 0.6 <= similarity < 1.0 : # se le similitudini vanno dal 60% a salire, è una correzione
+                corrections += 1
+
+    return corrections
 """
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                                    UTILITIES
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 """
+
+def _get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
+    # strip elimina gli spazi all'inizio e alla fine
+    # split divide in sottostringhe secondo un delimitatore. Senza nulla dentro, divide per spazi
+    return cmd.strip().split()[0]
+
+
+
+"""
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                                        EXECUTION
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+
+def process_cleaned_dataset(base_folder_path: Path):
+    if not (base_folder_path and base_folder_path.exists()):
+        logging.error(f"base_folder_path {base_folder_path} non existent")
+        return
+    starting_path = Path(base_folder_path, "cleaned")
+    resulting_path = base_folder_path / "processed"
+    if not starting_path.exists():
+        print(f"Errore: La cartella {starting_path} non esiste.")
+        return
+
+    resulting_path.mkdir(parents=True, exist_ok=True)
+
+    for json_file in starting_path.glob("*.json"):
+        parquet_output = resulting_path / json_file.with_suffix('.parquet').name
+        if os.path.exists(parquet_output):
+            logging.info(f"skipping {parquet_output}.")
+            continue
+
+        logging.info(f"Processing {json_file} ...")
+        try:
+            process_to_parquet(json_file, parquet_output)
+            logging.info(f"Completed {json_file}")
+        except Exception as e:
+            logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
+
+def read_parquet(output_path: Path):
+    if not output_path.exists():
+        print("Il file non esiste ancora.")
+        return pd.DataFrame()
+
+        # Usiamo lo stesso engine usato per la scrittura
+    return pd.read_parquet(output_path, engine='fastparquet')
+
+def concat_parquets(parquets_folder_path : Path) -> pd.DataFrame:
+    all_files = parquets_folder_path.glob('*.parquet')
+
+    df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
+
+    logging.info(f"Number of loaded files: {len(df)}")
+
+    df.to_parquet(parquets_folder_path.parent / "complete_dataset.parquet", index=False)
+    return df
+
 
 
 if __name__ == "__main__":
-    result_path = Path("C:\\Users\\Sveva\\Desktop\\result")
-
-    process_to_parquet(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\cleaned\\2019-05-14.json"), result_path, 500)
-    print(read_parquet(result_path))
+    logging.basicConfig(level=logging.DEBUG)
+    process_cleaned_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
+    concat_parquets(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\processed"))

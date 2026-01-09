@@ -35,8 +35,6 @@ from datetime import datetime
 """
 
 
-
-
 def set_working_folder(zenodo_local_path: Path):
     if not _check_directory(zenodo_local_path / "original", False):
         logging.error("no downloaded dataset directory found. Check path and try again")

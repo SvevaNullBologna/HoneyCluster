@@ -1,16 +1,17 @@
 import logging
 import os.path
+from pathlib import Path
 
+from pyexpat import features
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
 
-import pandas as pd
+from HoneyClusterData import concat_parquets
 
-# from MachineLearning.HoneyClusterData import HoneyClusterSession
+import pandas as pd
 
 
 import joblib # per salvare lo scaler per poterlo riutilizzare
-"""
 
 
 ARTIFACTS_DIR = "artifacts"
@@ -18,45 +19,30 @@ ARTIFACTS_DIR = "artifacts"
 def _ensure_artifacts_dir():
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
-def _build_full_matrix(new_logs: list[ZenodoLog], old_matrix: pd.DataFrame = None)-> pd.DataFrame:
-    new_matrix = _build_matrix_from_logs(new_logs)
-    if old_matrix is None or old_matrix.empty:
-        return new_matrix
-    else:
-        return pd.concat([old_matrix, new_matrix], ignore_index=True)
+def _normalize_data(dataset: pd.DataFrame, previous_scaler: StandardScaler = None):
 
-def _build_matrix_from_logs(logs: list[ZenodoLog]) -> pd.DataFrame:
-    rows = [
-        HoneyClusterSession(
-            get_date(log.date_of_log),
-            session
-        ).to_feature_dict()
-        for log in logs
-        for session in log.sessions
-    ]
-
-    return pd.DataFrame(rows)
-
-def _normalize_data(matrix: pd.DataFrame, previous_scaler: StandardScaler = None):
+    session_ids = dataset["session_id"] # li togliamo e mettiamo da parte, perché non vanno normalizzati
+    features_only = dataset.drop(columns=["session_id"])
+    
     if previous_scaler is None:
         scaler = StandardScaler() # restituiamo lo scaler perché contiene in sè proprio l'evoluzione dell'AI
-        scaled_array = scaler.fit_transform(matrix)
+        scaled_array = scaler.fit_transform(dataset)
     else:
         scaler = previous_scaler
-        scaled_array = scaler.transform(matrix)
+        scaled_array = scaler.transform(dataset)
 
     return (
-        pd.DataFrame(scaled_array, columns=matrix.columns, index=matrix.index),
+        pd.DataFrame(scaled_array, columns=dataset.columns, index=dataset.index),
         scaler
     )
 
-def _cluster_data(matrix: pd.DataFrame, eps: float = 0.7, min_samples: int = 5) :
+def _cluster_data(scaled_dataset: pd.DataFrame, eps: float = 0.7, min_samples: int = 5) :
 
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
 
-    labels = dbscan.fit_predict(matrix)
+    labels = dbscan.fit_predict(scaled_dataset)
 
-    clustered = matrix.copy()
+    clustered = scaled_dataset.copy()
     clustered["cluster"] = labels
 
     return clustered, dbscan
@@ -98,7 +84,7 @@ def load_previous_result():
     return or_data, sc_data, cl_data
 
 
-def clustering(logs: list[ZenodoLog]) :
+def clustering(complete_dataset_parquet_path : Path) :
     # cerchiamo di recuperare i vecchi dati salvati
 
     logging.info("loading ML data")
@@ -145,17 +131,10 @@ def cluster_analysis(clustered: pd.DataFrame):
         valid_clusters
         .groupby("cluster")
         .agg(
-            n_sessions = ("cluster", "count"),
-            avg_duration = ("duration", "mean"),
-            avg_commands = ("n_commands", "mean"),
-            avg_success_ration = ("success_ratio", "mean"),
-            avg_command_rate = ("command_rate", "mean"),
-            avg_command_diversity = ("command_diversity", "mean"),
-            avg_geo_variability = ("geo_variability", "mean")
+
         )).sort_values("n_sessions", ascending=False)
 
     logging.info("Numero cluster individuati: %d", summary.shape[0])
     logging.info("Sessioni rumorose (outlier): %d", len(noise))
 
     return summary
-"""
