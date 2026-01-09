@@ -2,17 +2,16 @@ import logging
 import os.path
 from pathlib import Path
 
-from pyexpat import features
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import DBSCAN
 
-from HoneyClusterData import concat_parquets
 
 import pandas as pd
 
 
 import joblib # per salvare lo scaler per poterlo riutilizzare
 
+from MachineLearning.HoneyClusterData import read_parquet
 
 ARTIFACTS_DIR = "artifacts"
 
@@ -20,27 +19,30 @@ def _ensure_artifacts_dir():
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
 def _normalize_data(dataset: pd.DataFrame, previous_scaler: StandardScaler = None):
-
+    """
+        normalizziamo i dati per evitare che uno sovrasti l'altro per le dimensioni troppo diverse
+    """
     session_ids = dataset["session_id"] # li togliamo e mettiamo da parte, perché non vanno normalizzati
     features_only = dataset.drop(columns=["session_id"])
-    
-    if previous_scaler is None:
+
+    if previous_scaler is None: # attenzione! Riutilizziamo lo scaler precedente se possibile perché è COLUI CHE IMPARA
         scaler = StandardScaler() # restituiamo lo scaler perché contiene in sè proprio l'evoluzione dell'AI
-        scaled_array = scaler.fit_transform(dataset)
+        scaled_array = scaler.fit_transform(features_only)
     else:
         scaler = previous_scaler
-        scaled_array = scaler.transform(dataset)
+        scaled_array = scaler.transform(features_only)
 
     return (
-        pd.DataFrame(scaled_array, columns=dataset.columns, index=dataset.index),
+        pd.DataFrame(scaled_array, columns=features_only.columns, index=session_ids),
         scaler
     )
 
 def _cluster_data(scaled_dataset: pd.DataFrame, eps: float = 0.7, min_samples: int = 5) :
-
+    """
+        eseguiamo il clustering di tipo DBSCAN * nella sezione documenti viene spiegato
+    """
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-
-    labels = dbscan.fit_predict(scaled_dataset)
+    labels = dbscan.fit_predict(scaled_dataset) # se restituisce -1 c'è un problema
 
     clustered = scaled_dataset.copy()
     clustered["cluster"] = labels
@@ -97,7 +99,7 @@ def clustering(complete_dataset_parquet_path : Path) :
 
     logging.info("building clustering matrix")
 
-    matrix = _build_full_matrix(logs, old_matrix)
+    matrix = read_parquet()
 
     # normalizzazione dei dati
 
