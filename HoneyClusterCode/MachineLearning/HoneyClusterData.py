@@ -44,7 +44,7 @@ class HoneyClusterData:
                 PROCESSING DATASET INTO USEFUL DATAS
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 """
-def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 500): # * vedi spiegazione sul formato parquet in documenti
+def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
     """
         {
             "sessions": {
@@ -63,7 +63,7 @@ def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 
     if not os.path.exists(json_path):
         return
 
-    buffer = []
+    all_sessions_in_file = []
 
     with open(json_path, 'rb') as f:
         parser = ijson.kvitems(f, 'sessions')
@@ -105,26 +105,11 @@ def process_to_parquet(json_path: Path, output_parquet: Path, chunk_size: int = 
 
             row = data_obj.__dict__
             row['session_id'] = session_id
-            buffer.append(row)
+            all_sessions_in_file.append(row)
 
-            # Quando il buffer è pieno, scrivi su disco
-            if len(buffer) >= chunk_size:
-                _save_chunk(buffer, output_parquet)
-                buffer = []  # Svuota il buffer
-
-            # Scrivi gli ultimi rimasti
-
-        if buffer:
-            _save_chunk(buffer, output_parquet)
-
-
-def _save_chunk(data_list: list, file_path: Path):
-    df_chunk = pd.DataFrame(data_list)
-
-    if not file_path.exists():
-        df_chunk.to_parquet(file_path, engine='fastparquet')
-    else:
-        df_chunk.to_parquet(file_path, engine='fastparquet', append=True)
+        if all_sessions_in_file:
+            df = pd.DataFrame(all_sessions_in_file)
+            df.to_parquet(output_parquet, engine='fastparquet', index=False)
 
 """
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -319,16 +304,24 @@ def process_cleaned_dataset(base_folder_path: Path):
         except Exception as e:
             logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
 
-def read_parquet(output_path: Path):
-    if not output_path.exists():
-        print("Il file non esiste ancora.")
+def read_parquet(output_path: Path) -> pd.DataFrame:
+    try:
+        datas = pd.read_parquet(output_path, engine='fastparquet')
+        return datas
+    except Exception as e:
+        logging.warning(f"Errore di lettura {output_path.name}: {e}")
         return pd.DataFrame()
 
-        # Usiamo lo stesso engine usato per la scrittura
-    return pd.read_parquet(output_path, engine='fastparquet')
+def concat_parquets(base_folder_path : Path) -> pd.DataFrame:
+    parquets_folder_path = base_folder_path / "processed"
+    if not os.path.exists(parquets_folder_path):
+        logging.error(f"La cartella {parquets_folder_path} non existent")
+        return pd.DataFrame()
 
-def concat_parquets(parquets_folder_path : Path) -> pd.DataFrame:
     all_files = parquets_folder_path.glob('*.parquet')
+
+    if not all_files:
+        return pd.DataFrame()
 
     df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
 
@@ -339,11 +332,24 @@ def concat_parquets(parquets_folder_path : Path) -> pd.DataFrame:
     return df
 
 
+def get_main_dataset_from_processed(base_folder_path: Path) -> pd.DataFrame:
+
+        logging.basicConfig(level=logging.DEBUG)
+        process_cleaned_dataset(base_folder_path)
+        complete = concat_parquets(base_folder_path)
+        return complete
+
+def read_obtained_main_dataset(base_folder_path: Path) -> pd.DataFrame:
+    try:
+        m_ds = read_parquet(Path(base_folder_path, "complete_dataset.parquet"))
+        return m_ds
+    except FileNotFoundError:
+        logging.error("please, get main dataset before trying to read it")
+        return pd.DataFrame()
+
+
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    #process_cleaned_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-    concat_parquets(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\processed"))
-    pd = read_parquet(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\complete_dataset.parquet"))
-
-    print(pd)
+    base_folder_path = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
+    dataset = get_main_dataset_from_processed(base_folder_path)
+    print(read_obtained_main_dataset(base_folder_path))

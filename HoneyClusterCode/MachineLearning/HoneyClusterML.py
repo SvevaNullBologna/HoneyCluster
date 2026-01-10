@@ -1,19 +1,28 @@
 import logging
 import os.path
+from pathlib import Path
 
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import HDBSCAN
 
 from joblib import dump
 from joblib import load
 
 import pandas as pd
 
+
 from kneed import KneeLocator # libreria matematica per automatizzare il rilevamento dell'elbow
 
-ARTIFACTS_DIR = "artifacts"
+"""
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                                                                        PRIVATE PIPELINE METHODS
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+
+ARTIFACTS_DIR = "C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\artifacts"
 
 def _ensure_artifacts_dir():
     os.makedirs(ARTIFACTS_DIR, exist_ok=True)
@@ -42,6 +51,7 @@ def _normalize_data(dataset: pd.DataFrame, previous_scaler: StandardScaler = Non
         scaler
     )
 
+"""
 def _stimate_best_eps_and_min_samples(datased: pd.DataFrame):
 
     n_features = datased.shape[1] # numero di features = numero colonne - indice
@@ -49,7 +59,7 @@ def _stimate_best_eps_and_min_samples(datased: pd.DataFrame):
     min_samples = n_features + 1
 
     # k-distance
-    neighbors = NearestNeighbors(n_neighbors=min_samples)
+    neighbors = NearestNeighbors(n_neighbors=min_samples, n_jobs=-1)
     neighbors.fit(datased)
 
     distances, _ = neighbors.kneighbors(datased)
@@ -72,12 +82,13 @@ def _stimate_best_eps_and_min_samples(datased: pd.DataFrame):
 
     return float(epsilon), float(min_samples)
 
-def _cluster_data(scaled_dataset: pd.DataFrame, old_dbscan: DBSCAN = None) :
+
+def _cluster_data(scaled_dataset: pd.DataFrame, old_dbscan: HDBSCAN = None) :
     # eseguiamo il clustering di tipo DBSCAN * nella sezione documenti viene spiegato
 
     if not old_dbscan:
         eps, min_samples =  _stimate_best_eps_and_min_samples(scaled_dataset)
-        dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+        hdbscan = HDBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1)
     else:
         dbscan = old_dbscan
 
@@ -88,7 +99,18 @@ def _cluster_data(scaled_dataset: pd.DataFrame, old_dbscan: DBSCAN = None) :
 
     return clustered, dbscan
 
-def _save_data(scaler: StandardScaler, dbscan: DBSCAN, scaled_dataset: pd.DataFrame, clustered: pd.DataFrame) -> None:
+"""
+
+def _cluster_data(scaled_dataset: pd.DataFrame, old_hdbscan: HDBSCAN = None) :
+    clusterer = HDBSCAN(min_cluster_size=50)
+
+    labels = clusterer.fit_predict(scaled_dataset)
+    clustered = scaled_dataset.copy()
+    clustered["cluster"] = labels
+
+    return clustered, None
+
+def _save_data(scaler: StandardScaler, dbscan: HDBSCAN, clustered: pd.DataFrame) -> None:
     _ensure_artifacts_dir()
 
     #salvataggio oggetti intelligenti (modelli)
@@ -96,7 +118,6 @@ def _save_data(scaler: StandardScaler, dbscan: DBSCAN, scaled_dataset: pd.DataFr
     dump(dbscan, f"{ARTIFACTS_DIR}/dbscan.joblib")
 
     #salvataggio dati in file (tabelle)
-    scaled_dataset.to_parquet(f"{ARTIFACTS_DIR}/scaled_data.parquet") # formato tabellare più efficiente del CSV. Compresso, veloce e mantiene i tipi di dati.
     clustered.to_parquet(f"{ARTIFACTS_DIR}/clustered_results.parquet")
 
     logging.info("tabelle, scaler salvati")
@@ -125,44 +146,35 @@ def _load_previous_result():
 
     return sc_data, cl_data
 
-def run_honey_clustering_pipeline():
-    pass
-
 """
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                                                                    PUBLIC/COMPLETE METHODS
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+
 def clustering(complete_dataset_parquet_path : Path) :
-    # cerchiamo di recuperare i vecchi dati salvati
-
-    logging.info("loading ML data")
-
+    logging.info("Starting clustering pipeline...")
     _ensure_artifacts_dir() # controlla se esiste la cartella, in caso la crea
-    old_scaler = _load_trained_scaler()
-    old_matrix, _ , _  = load_previous_result()
 
-    # aggiungiamo alla matrice (se necessario) i dati vecchi
+    #recuperiamo il dataset
+    logging.info("Loading dataset...")
+    df = pd.read_parquet(complete_dataset_parquet_path)
 
-    logging.info("building clustering matrix")
+    #normalizzazione
+    logging.info("Normalization...")
+    old_scaler, old_dbscan = _load_trained_scaler_and_dbscan()
+    scaled_dataset, current_scaler = _normalize_data(df, old_scaler)
 
-    matrix = read_parquet()
+    #clustering
+    logging.info("clustering. Please be patient...")
+    clustered_data, current_dbscan = _cluster_data(scaled_dataset, old_dbscan)
 
-    # normalizzazione dei dati
+    #salvataggio modifiche
+    _save_data(old_scaler, old_dbscan, clustered_data)
 
-    logging.info("normalizing data in clustering matrix")
+    return clustered_data
 
-    scaled_matrix, scaler = _normalize_data(matrix, old_scaler)
-
-    # clustering
-
-    logging.info("clustering. Please be patient")
-
-    clustered, _ = _cluster_data(scaled_matrix)
-
-    # salvataggio delle modifiche
-
-    logging.info("saving clustered data")
-
-    save_data(scaler, matrix, scaled_matrix, clustered)
-
-    return clustered
 
 
 def cluster_analysis(clustered: pd.DataFrame):
@@ -183,4 +195,16 @@ def cluster_analysis(clustered: pd.DataFrame):
     logging.info("Sessioni rumorose (outlier): %d", len(noise))
 
     return summary
+
+
 """
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+                                                                        EXECUTION
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+"""
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    clustered = clustering(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\complete_dataset.parquet"))
+    summary = cluster_analysis(clustered)
+    print(summary)

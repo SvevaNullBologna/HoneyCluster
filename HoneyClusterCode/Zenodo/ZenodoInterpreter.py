@@ -275,6 +275,7 @@ def drop_nulls(d: dict)-> dict:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
     clean_zenodo_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
 
 
