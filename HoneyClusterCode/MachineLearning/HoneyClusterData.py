@@ -325,6 +325,13 @@ def concat_parquets(base_folder_path : Path) -> pd.DataFrame:
 
     df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
 
+    if 'session_id' in df.columns:
+        df.drop(columns=['session_id'], inplace=True)
+
+    df = df.round(2)
+
+    df.drop_duplicates(inplace=True)
+
     logging.info(f"Number of loaded files: {len(df)}")
 
     df.to_parquet(parquets_folder_path.parent / "complete_dataset.parquet", index=False)
