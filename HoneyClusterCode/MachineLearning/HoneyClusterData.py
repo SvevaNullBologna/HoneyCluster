@@ -8,6 +8,8 @@ import ijson
 import pandas as pd
 from datetime import datetime
 
+
+
 from Zenodo.ZenodoInterpreter import is_command
 
 """
@@ -333,11 +335,15 @@ def concat_parquets(parquets_folder_path : Path) -> pd.DataFrame:
     logging.info(f"Number of loaded files: {len(df)}")
 
     df.to_parquet(parquets_folder_path.parent / "complete_dataset.parquet", index=False)
+
     return df
 
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    process_cleaned_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
+    #process_cleaned_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
     concat_parquets(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\processed"))
+    pd = read_parquet(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\complete_dataset.parquet"))
+
+    print(pd)
