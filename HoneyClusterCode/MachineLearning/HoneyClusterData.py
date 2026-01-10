@@ -236,7 +236,7 @@ def _get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
 
 
 def _get_error_rate(statuses: list[int] = None)-> float:
-    if not statuses:
+    if statuses is None or statuses == []:
         return 0.0
 
     return statuses.count(0) / len(statuses)
@@ -346,7 +346,7 @@ def get_main_dataset_from_processed(base_folder_path: Path) -> pd.DataFrame:
         complete = concat_parquets(base_folder_path)
         return complete
 
-def read_obtained_main_dataset(base_folder_path: Path) -> pd.DataFrame:
+def read_main_dataset(base_folder_path: Path) -> pd.DataFrame:
     try:
         m_ds = read_parquet(Path(base_folder_path, "complete_dataset.parquet"))
         return m_ds
@@ -359,4 +359,4 @@ def read_obtained_main_dataset(base_folder_path: Path) -> pd.DataFrame:
 if __name__ == "__main__":
     base_folder_path = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
     dataset = get_main_dataset_from_processed(base_folder_path)
-    print(read_obtained_main_dataset(base_folder_path))
+    print(read_main_dataset(base_folder_path))
