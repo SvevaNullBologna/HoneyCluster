@@ -4,35 +4,10 @@ from pathlib import Path
 import gzip
 import json
 import ijson
-import re
+
 from datetime import datetime
 
-
-"""
-        def download_zenodo_dataset(self, record_id):
-    api_url = f"https://zenodo.org/api/records/{record_id}"
-
-    try:
-        response = requests.get(api_url)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        logging.error(f"Errore nel contattare Zenodo {api_url}: {e}")
-        return []
-    try:
-        meta_record = response.json()
-    except ValueError as e:
-        logging.error(f"Errore nella risposta di Zenodo. Non è un json valido: {e}")
-        return []
-
-    files = meta_record.get("files", [])
-    if not isinstance(files, list):
-        logging.error("Campo 'files' mancante o non valido nella risposta Zenodo")
-        return []
-
-    gz_files = [f for f in files if f.get("key", "").endswith(".gz")]
-    return gz_files
-
-"""
+import status_keys as sk
 
 
 def set_working_folder(zenodo_local_path: Path):
@@ -64,45 +39,47 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
         logging.info(f"cleaning {log_date} to {out_file}")
 
         with gzip.open(gz_path, "rb") as f, open(out_file, "w", encoding="utf-8") as out:
-            # 1. Inizio del documento
-            out.write('{\n')
-            out.write('  "sessions": {')  # Apro l'oggetto sessions
-
+            out.write('{\n  "sessions": {')
             first_session = True
 
-            # ijson.items legge un generatore, quindi la RAM resta bassa
+            # Iteriamo sugli oggetti principali del JSON
             for session in ijson.items(f, "item"):
+                # Ogni 'session' è un dict { session_id: [events] }
                 for session_id, events in session.items():
-                    cleaned_events = []
-
-                    for e in events:
-                        ce = _clean_event(e)
-                        if not ce:
-                            continue
-
-                        cleaned_events.append(ce)
-
-                    if not cleaned_events:
+                    if not events:
                         continue
 
-                    # 2. Gestione della virgola tra le chiavi di "sessions"
-                    if not first_session:
-                        out.write(",")
+                    cleaned_events = []
+                    has_real_activity = False
 
-                    out.write(f'\n    "{session_id}": ')
-                    # dumpiamo solo la lista di eventi di UNA sessione alla volta
-                    json.dump(cleaned_events, out, ensure_ascii=False, default=float)
+                    # Processiamo ogni evento della sessione
+                    for e in events:
+                        ce = _clean_event(e)
+                        if ce:
+                            cleaned_events.append(ce)
+                            has_real_activity = True
 
-                    first_session = False
+                    # SCRIVIAMO LA SESSIONE (Spostato dentro il ciclo corretto)
+                    if has_real_activity:
+                        session_data = {
+                            "session_start": events[0].get("timestamp"),
+                            "session_end": events[-1].get("timestamp"),
+                            "raw_event_count": len(events),
+                            "events": cleaned_events
+                        }
 
-            # 3. Chiusura della struttura (fondamentale!)
+                        if not first_session:
+                            out.write(",")
+
+                        out.write(f'\n    "{session_id}": ')
+                        json.dump(session_data, out, ensure_ascii=False)
+                        first_session = False
+
             out.write('\n  }\n}')
-
         return True
 
     except Exception as e:
         logging.error(f"error cleaning {gz_path.name}: {e}")
-        # Se fallisce, rimuoviamo il file parziale per evitare corruzioni al prossimo avvio
         if out_file.exists():
             out_file.unlink()
         return False
@@ -161,31 +138,28 @@ def _clean_event(e:dict, add_geolocation: bool = False) -> dict | None: # elimin
     if not eventid:
         return None
 
+    status = sk.get_status(eventid)
+    if not sk.status_is_interesting(status):
+        return None
+
     cleaned = {
-       "eventid": eventid
+        "status": status,
+        "timestamp": e.get("timestamp")
     }
 
-    #timestamp sempre utile (timing, inter-command time)
-    if e.get("timestamp") is not None:
-        cleaned["timestamp"] = _convert_decimals(e["timestamp"])
-
-    #message solo se è un comando
-    if is_command(eventid) != -1:
-        msg = e.get("message")
-        if msg:
-            msg = _isolate_command(msg)
-            cleaned["message"] = _convert_decimals(msg)
+    specific_data = sk.get_data_by_status(status, e)
+    if specific_data:
+        cleaned.update(specific_data)
 
 
     #geolocalizzazione opzionale
     if add_geolocation:
         geo = e.get("geolocation_data")
-        if geo:
-            geo_clean = _clean_geolocation(geo)
-            if geo_clean:
-                cleaned["geolocation_data"] = geo_clean
+        geo_clean = _clean_geolocation(geo)
+        if geo_clean:
+            cleaned["geo"] = geo_clean
 
-    return cleaned
+    return _convert_decimals(cleaned)
 
 def _clean_geolocation(geo:dict) -> dict | None: # mantiene solo campi validi e converte Decimal -> float
     if not geo:
@@ -213,52 +187,6 @@ def parse_date_from_gz_filename(filename:str) -> str:
                                     UTILITIES 
 ////////////////////////////////////////////////////////////////////////////////////////////
 """
-
-
-
-def get_time(timestamp: str) -> datetime | None:
-    """ nel json "timestamp": "2019-05-18T00:00:16.582846Z" """
-    if not timestamp:
-        logging.error("empty timestamp")
-        return None
-    try:
-        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        return dt
-    except ValueError:
-        logging.warning(f"Invalid timestamp: {timestamp}")
-        return None
-
-def is_command(eventid: str) -> int:
-    """
-    -1 = not a command
-    0 = command failure
-    1 = command success
-    2 = command input / unknown
-    """
-
-    if not eventid.startswith("cowrie.command"):
-        return -1
-    if eventid.endswith("success"):
-        return 1
-    if eventid.endswith("failure"):
-        return 0
-    return 2
-
-def _isolate_command(message: str) -> str:
-    s = message.strip()
-    s = re.sub(r'^Command found:\s*', '', s, flags=re.IGNORECASE)
-    s = re.sub(r'^CMD:\s*', '', s, flags=re.IGNORECASE)
-    s = re.sub(r'^Command not found:\s*', '', s, flags=re.IGNORECASE)
-    return s
-
-def extract_command(message: str, eventid: str) -> str | None:
-    if not message:
-        # logging.error("no valid message")
-        return None
-    if is_command(eventid) == -1:
-        # logging.error("invalid command")
-        return None
-    return _isolate_command(message)
 
 
 def parse_date_from_json_filename(filename: str) -> str: # es: cyberlab_2019-05-13.json -> 2019-05-13

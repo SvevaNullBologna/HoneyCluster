@@ -9,9 +9,10 @@ from HoneyClusterData import read_main_dataset
 
 from joblib import dump,load
 
-_SCALER_PATH = "scaler_honeypot.joblib"
-_MODEL_PATH = "hdbscan_model.joblib"
-_CORE_DATASET_PATH = "core_dataset.parquet"
+_ARTIFACTS = "C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\artifacts"
+_SCALER_PATH = Path(_ARTIFACTS,"scaler_honeypot.joblib")
+_MODEL_PATH = Path(_ARTIFACTS,"hdbscan_model.joblib")
+_CORE_DATASET_PATH = Path(_ARTIFACTS,"core_dataset.parquet")
 
 def _extraction_of_initial_clustering_subset(base_folder_path: Path, n_samples: int = 200000) -> pd.DataFrame:
     logging.info("Caricamento dataset principale")

@@ -8,9 +8,10 @@ import ijson
 import pandas as pd
 from datetime import datetime
 
+import Zenodo.status_keys as sk
 
 
-from Zenodo.ZenodoInterpreter import is_command
+from Zenodo.status_keys import get_status
 
 """
 DALLA CONSEGNA:
@@ -47,16 +48,22 @@ class HoneyClusterData:
 def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
     """
         {
-            "sessions": {
-                "idnumerico" : [
-                    {
-                        "eventid" : "stringa",
-                        "timestamp" : "valo reinstringa",
-                        "message": "comando" <- ATTENZIONE: questo campo compare solo se eventid corrisponde ad un comando
-                    }
-                ],
+            "sessions":
+            {
+                "session_start" : str,
+                "session_end" : str,
+                "raw_event_count": int,
+                "events": * solo eventi rilevanti
+                [
+                            {
+                                "status" : int,
+                                "timestamp" : str,
+                                * valori che dipendono dallo status
+                            }
+                ]
                 ...
             }
+            ...
         }
         """
 
@@ -68,32 +75,35 @@ def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazi
     with open(json_path, 'rb') as f:
         parser = ijson.kvitems(f, 'sessions')
 
-        for session_id, events in parser:
+        for session_id, session_data in parser:
             # estrazione immediata dei dati necessari dalla sessione corrente
-            timestamps, commands, verbs, statuses = [], [], [], []
-
-            for event in events:
-                # estraiamo i cambi base
-                eid = event.get('eventid')
-                ts_str = event.get('timestamp')
-                msg = event.get('message')
-
-                # molto più veloce di pd.to_datetime
-                ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-
-                statuses.append(is_command(eid))
-                timestamps.append(ts)
-                if msg:
-                    commands.append(msg)
-                    verbs.append(_get_verb_of_command(msg))
-
-            if not timestamps:
+            events = session_data.get('events',[])
+            if not events:
                 continue
+
+            timestamps = commands = verbs = statuses = []
+            ssh_version = None
+
+            for e in events:
+                status = e.get('status')
+
+                statuses.append(status)
+                timestamps.append(time)
+                # estraiamo i cambi base
+                if sk.is_command(status):
+                    cmd = e.get('msg')
+                    if cmd :
+                        commands.append(cmd)
+                        verbs.append(_get_verb_of_command(cmd))
+
+                if sk.is_version(status):
+                    ssh_version = e.get('version')
+
 
             # qui posso già calcolare i valori voluti in HoneyClusterData:
             data_obj = HoneyClusterData(
                 inter_command_timing=_get_inter_command_timing(timestamps),
-                session_duration=_get_session_duration(timestamps),
+                session_duration=_get_session_duration(start_time, end_time),
                 time_of_day_patterns=_get_time_of_day_patterns(timestamps),
                 unique_commands_ratio=_get_unique_commands_ratio(commands),
                 command_diversity_ratio=_get_command_diversity_ratio(verbs),
@@ -236,7 +246,7 @@ def _get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
 
 
 def _get_error_rate(statuses: list[int] = None)-> float:
-    if statuses is None or statuses == []:
+    if not statuses :
         return 0.0
 
     return statuses.count(0) / len(statuses)
@@ -357,6 +367,6 @@ def read_main_dataset(base_folder_path: Path) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    base_folder_path = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
-    dataset = get_main_dataset_from_processed(base_folder_path)
-    print(read_main_dataset(base_folder_path))
+    base_folder = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
+    dataset = get_main_dataset_from_processed(base_folder)
+    print(read_main_dataset(base_folder))
