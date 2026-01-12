@@ -1,5 +1,5 @@
 import logging
-from Zenodo.ZenodoInterpreter import get_zenodo_log_list
+from Zenodo.ZenodoCleaner import get_zenodo_log_list
 from MachineLearning.HoneyClusterML import clustering
 from MachineLearning.HoneyClusterML import cluster_analysis
 

@@ -1,17 +1,9 @@
-import logging
-import os
+
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from pathlib import Path
 
-import ijson
-import pandas as pd
 from datetime import datetime
 
-import Zenodo.status_keys as sk
-
-
-from Zenodo.status_keys import get_status
 
 """
 DALLA CONSEGNA:
@@ -41,87 +33,6 @@ class HoneyClusterData:
     command_correction_attempts: int # quante volte in media l'attaccante cerca di correggersi
 
 """
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                PROCESSING DATASET INTO USEFUL DATAS
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-"""
-def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
-    """
-        {
-            "sessions":
-            {
-                "session_start" : str,
-                "session_end" : str,
-                "raw_event_count": int,
-                "events": * solo eventi rilevanti
-                [
-                            {
-                                "status" : int,
-                                "timestamp" : str,
-                                * valori che dipendono dallo status
-                            }
-                ]
-                ...
-            }
-            ...
-        }
-        """
-
-    if not os.path.exists(json_path):
-        return
-
-    all_sessions_in_file = []
-
-    with open(json_path, 'rb') as f:
-        parser = ijson.kvitems(f, 'sessions')
-
-        for session_id, session_data in parser:
-            # estrazione immediata dei dati necessari dalla sessione corrente
-            events = session_data.get('events',[])
-            if not events:
-                continue
-
-            timestamps = commands = verbs = statuses = []
-            ssh_version = None
-
-            for e in events:
-                status = e.get('status')
-
-                statuses.append(status)
-                timestamps.append(time)
-                # estraiamo i cambi base
-                if sk.is_command(status):
-                    cmd = e.get('msg')
-                    if cmd :
-                        commands.append(cmd)
-                        verbs.append(_get_verb_of_command(cmd))
-
-                if sk.is_version(status):
-                    ssh_version = e.get('version')
-
-
-            # qui posso già calcolare i valori voluti in HoneyClusterData:
-            data_obj = HoneyClusterData(
-                inter_command_timing=_get_inter_command_timing(timestamps),
-                session_duration=_get_session_duration(start_time, end_time),
-                time_of_day_patterns=_get_time_of_day_patterns(timestamps),
-                unique_commands_ratio=_get_unique_commands_ratio(commands),
-                command_diversity_ratio=_get_command_diversity_ratio(verbs),
-                tool_signatures=_get_tool_signatures(verbs),
-                reconnaissance_vs_exploitation_ratio=_get_reconnaissance_vs_exploitation_ratio(verbs),
-                error_rate=_get_error_rate(statuses),
-                command_correction_attempts =_get_command_correction_attempts(statuses, commands)
-            )
-
-            row = data_obj.__dict__
-            row['session_id'] = session_id
-            all_sessions_in_file.append(row)
-
-        if all_sessions_in_file:
-            df = pd.DataFrame(all_sessions_in_file)
-            df.to_parquet(output_parquet, engine='fastparquet', index=False)
-
-"""
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
                 EXTRACTING FEATURES
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -130,7 +41,7 @@ def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazi
     EXTRACT TEMPORAL FEATURES
 """
 
-def _get_inter_command_timing(command_times: list[datetime] = None) -> float:
+def get_inter_command_timing(command_times: list[datetime] = None) -> float:
     """ otteniamo il tempo medio tra un comando e l'altro """
     if not command_times or len(command_times) < 2:
         return 0.0 # non abbiamo informazioni
@@ -142,13 +53,13 @@ def _get_inter_command_timing(command_times: list[datetime] = None) -> float:
 
     return sum(deltas) / len(deltas) # restituisce la media
 
-def _get_session_duration(times: list[datetime] = None) -> float:
+def get_session_duration(times: list[datetime] = None) -> float:
     """ durata totale della sessione in secondi """
     if not times or len(times) < 2:
         return 0.0
     return (max(times) - min(times)).total_seconds()
 
-def _get_time_of_day_patterns(times: list[datetime] = None) -> float:
+def get_time_of_day_patterns(times: list[datetime] = None) -> float:
     """ otteniamo l'abitudine oraria dell'attaccante """
     if not times: # se non abbiamo informazioni
         return 0.0
@@ -171,12 +82,12 @@ _SIGNATURES = {
         'cleanup': {'history -c', 'rm -rf', 'unset HISTFILE'}
 }
 
-def _get_unique_commands_ratio(commands: list[str] = None)-> float:
+def get_unique_commands_ratio(commands: list[str] = None)-> float:
     if not commands: # non abbiamo informazioni
         return 0.0
     return len(set(commands)) / len(commands) # quanti comandi unici ci sono sul loro totale. Qui non si considerano gli errori nella scrittura dei comandi ma il 'movimento'
 
-def _get_command_diversity_ratio(verbs: list[str] = None)-> float:
+def get_command_diversity_ratio(verbs: list[str] = None)-> float:
     """ quanti strumenti diversi conosce l'attaccante """
     if not verbs:
         return 0.0
@@ -205,7 +116,7 @@ _BEHAVIORAL_MAP = {
 }
 
 
-def _get_tool_signatures(verbs: list[str] = None)-> float:
+def get_tool_signatures(verbs: list[str] = None)-> float:
     """ conta quante sotto-categorie (firme) diverse sono state attivate """
     if not verbs:
         return 0.0
@@ -228,7 +139,7 @@ def _get_tool_signatures(verbs: list[str] = None)-> float:
     EXTRACT BEHAVIORAL PATTERNS 
 """
 
-def _get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
+def get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
     """ calcola il rapporto tra verbi di ricerca e verbi di attacco """
     if not verbs:
         return 0.0
@@ -245,14 +156,14 @@ def _get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
     return recon_count / exploit_count
 
 
-def _get_error_rate(statuses: list[int] = None)-> float:
+def get_error_rate(statuses: list[int] = None)-> float:
     if not statuses :
         return 0.0
 
     return statuses.count(0) / len(statuses)
 
 
-def _get_command_correction_attempts(statuses: list[str] = None, commands: list[str] = None)-> int:
+def get_command_correction_attempts(statuses: list[str] = None, commands: list[str] = None)-> int:
 
     cmd_statuses = [s for s in statuses if s != -1] # la lunghezza dovrebbe matchare quella della lista dei comandi
 
@@ -275,98 +186,9 @@ def _get_command_correction_attempts(statuses: list[str] = None, commands: list[
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 """
 
-def _get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
+def get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
     # strip elimina gli spazi all'inizio e alla fine
     # split divide in sottostringhe secondo un delimitatore. Senza nulla dentro, divide per spazi
     return cmd.strip().split()[0]
 
 
-
-"""
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                        EXECUTION
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-"""
-
-
-def process_cleaned_dataset(base_folder_path: Path):
-    if not (base_folder_path and base_folder_path.exists()):
-        logging.error(f"base_folder_path {base_folder_path} non existent")
-        return
-    starting_path = Path(base_folder_path, "cleaned")
-    resulting_path = base_folder_path / "processed"
-    if not starting_path.exists():
-        print(f"Errore: La cartella {starting_path} non esiste.")
-        return
-
-    resulting_path.mkdir(parents=True, exist_ok=True)
-
-    for json_file in starting_path.glob("*.json"):
-        parquet_output = resulting_path / json_file.with_suffix('.parquet').name
-        if os.path.exists(parquet_output):
-            logging.info(f"skipping {parquet_output}.")
-            continue
-
-        logging.info(f"Processing {json_file} ...")
-        try:
-            process_to_parquet(json_file, parquet_output)
-            logging.info(f"Completed {json_file}")
-        except Exception as e:
-            logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
-
-def read_parquet(output_path: Path) -> pd.DataFrame:
-    try:
-        datas = pd.read_parquet(output_path, engine='fastparquet')
-        return datas
-    except Exception as e:
-        logging.warning(f"Errore di lettura {output_path.name}: {e}")
-        return pd.DataFrame()
-
-def concat_parquets(base_folder_path : Path) -> pd.DataFrame:
-    parquets_folder_path = base_folder_path / "processed"
-    if not os.path.exists(parquets_folder_path):
-        logging.error(f"La cartella {parquets_folder_path} non existent")
-        return pd.DataFrame()
-
-    all_files = parquets_folder_path.glob('*.parquet')
-
-    if not all_files:
-        return pd.DataFrame()
-
-    df = pd.concat((pd.read_parquet(f) for f in all_files), ignore_index=True)
-
-    if 'session_id' in df.columns:
-        df.drop(columns=['session_id'], inplace=True)
-
-    df = df.round(2)
-
-    df.drop_duplicates(inplace=True)
-
-    logging.info(f"Number of loaded files: {len(df)}")
-
-    df.to_parquet(parquets_folder_path.parent / "complete_dataset.parquet", index=False)
-
-    return df
-
-
-def get_main_dataset_from_processed(base_folder_path: Path) -> pd.DataFrame:
-
-        logging.basicConfig(level=logging.DEBUG)
-        process_cleaned_dataset(base_folder_path)
-        complete = concat_parquets(base_folder_path)
-        return complete
-
-def read_main_dataset(base_folder_path: Path) -> pd.DataFrame:
-    try:
-        m_ds = read_parquet(Path(base_folder_path, "complete_dataset.parquet"))
-        return m_ds
-    except FileNotFoundError:
-        logging.error("please, get main dataset before trying to read it")
-        return pd.DataFrame()
-
-
-
-if __name__ == "__main__":
-    base_folder = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
-    dataset = get_main_dataset_from_processed(base_folder)
-    print(read_main_dataset(base_folder))
