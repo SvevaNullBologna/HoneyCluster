@@ -94,6 +94,10 @@ def get_interesting_data_by_status(status: int, event: dict) -> dict | None:
 def is_login(status: int)-> bool:
     return status in [Status.LOGIN_FAILED.value, Status.LOGIN_SUCCESS.value]
 
+def count_logins(statuses: list[int]) -> int:
+    if not statuses:
+        return 0
+    return sum(is_login(status) for status in statuses)
 """
 //////////////////////////////////////////////////GESTIONE VERSION///////////////////////////////////////////////////
 """
