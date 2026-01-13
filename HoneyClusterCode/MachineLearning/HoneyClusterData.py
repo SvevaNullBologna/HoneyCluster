@@ -3,13 +3,16 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Tuple
 
-from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED, MAX_SIGNATURE_SCORE
-from command_vocabularies import _SIGNATURES, SIGNATURE_WEIGHTS
+from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED, MAX_SIGNATURE_SCORE, \
+    get_recon_exploit_flat
+from MachineLearning.command_vocabularies import _SIGNATURES, SIGNATURE_WEIGHTS
 
 
-import Zenodo.ZenodoDataReader as ZDR
+from Zenodo import ZenodoDataReader as ZDR
 from datetime import datetime
 import math
+
+from Zenodo.ZenodoDataReader import is_only_command, is_login
 
 """
 DALLA CONSEGNA:
@@ -28,7 +31,8 @@ class HoneyClusterData:
     # temporal features
     inter_command_timing : float    # tempo che passa tra i comandi inviati
     session_duration: float     # durata della sessione
-    time_of_day_patterns: float # codifica dell'abitudine temporale
+    time_of_day_patterns_sin: float
+    time_of_day_patterns_cos: float # codifica dell'abitudine temporale
     # command based features
     unique_commands_ratio : float
     command_diversity_ratio : float
@@ -176,23 +180,61 @@ def get_error_rate(statuses: list[int] = None)-> float:
 
     return - (len(failures) / len(attempts))
 
-def get_command_correction_attempts(statuses:list[int], commands:list[str])-> float:
-    statuses = [status for status in statuses if ZDR.is_command(status)]
 
-    if not statuses or not commands or len(statuses)  < 2 or len(statuses) != len(commands):
-        return 0
+def get_command_correction_attempts(statuses: list[int], commands: list[str], login_data: list[tuple[str]]) -> float:
+    # 1. Creiamo una lista unificata filtrata, ma mantenendo l'ordine temporale
+    # Usiamo gli indici per evitare i problemi dello zip
+    valid_events = []
+
+    # Indici separati per scorrere commands e login_data solo quando troviamo l'evento giusto
+    cmd_idx = 0
+    login_idx = 0
+
+    for s in statuses:
+        if is_only_command(s):
+            # Se è un comando, prendiamo il testo del comando corrispondente
+            if cmd_idx < len(commands):
+                # Aggiungiamo (stato, comando, None)
+                valid_events.append((s, commands[cmd_idx], None))
+                cmd_idx += 1
+        elif is_login(s):
+            # Se è un login, prendiamo i dati del login corrispondenti
+            if login_idx < len(login_data):
+                # Aggiungiamo (stato, None, dati_login)
+                valid_events.append((s, None, login_data[login_idx]))
+                login_idx += 1
+
+    if len(valid_events) < 2:
+        return 0.0
 
     corrections = 0
+    # Il denominatore dovrebbe essere il numero di tentativi (non tutti gli eventi)
+    total_relevant_events = len(valid_events)
 
-    for i in range(1, len(commands)):
-        prev_status = statuses[i-1]
-        prev_cmd = commands[i-1]
-        curr_cmd = commands[i]
+    for i in range(1, total_relevant_events):
+        prev_status, prev_cmd, prev_login = valid_events[i - 1]
+        curr_status, curr_cmd, curr_login = valid_events[i]
 
-        if ZDR.is_only_command(prev_status) and prev_status == ZDR.Status.COMMAND_FAILED.value:
-            similiarity = SequenceMatcher(None, prev_cmd, curr_cmd).ratio()
-            if 0.7 <= similiarity < 1.0:
+        # --- CORREZIONE COMANDO ---
+        # Verifichiamo che entrambi siano comandi (non None)
+        if prev_status == ZDR.Status.COMMAND_FAILED.value and prev_cmd and curr_cmd:
+            len_diff = abs(len(prev_cmd) - len(curr_cmd))
+            command_similarity = SequenceMatcher(None, prev_cmd, curr_cmd).ratio()
+
+            if (len(prev_cmd) <= 3 and len_diff <= 1) or (command_similarity >= 0.70):
+                if prev_cmd != curr_cmd:
+                    corrections += 1
+
+        # --- CORREZIONE LOGIN ---
+        # Verifichiamo che entrambi siano login (non None)
+        elif prev_status == ZDR.Status.LOGIN_FAILED.value and prev_login and curr_login:
+            user_similarity = SequenceMatcher(None, prev_login[0], curr_login[0]).ratio()
+            password_similarity = SequenceMatcher(None, prev_login[1], curr_login[1]).ratio()
+
+            if ((0.7 <= user_similarity < 1.0 and password_similarity >= 0.9) or
+                    (user_similarity == 1.0 and 0.7 <= password_similarity < 1.0)):
                 corrections += 1
-    return corrections / len(commands)
+
+    return corrections / total_relevant_events
 
 

@@ -20,11 +20,10 @@ def set_working_folder(zenodo_local_path: Path):
     return raw_path, clean_path
 
 
-def extract_and_clean_all_zenodo_logs_in_folder(originals_path: Path, cleaned_path: Path) -> bool:
-    return all(
+def extract_and_clean_all_zenodo_logs_in_folder(originals_path: Path, cleaned_path: Path):
+    for filename in originals_path.glob("*.json.gz"):
         clean_zenodo_gz(filename, cleaned_path)
-        for filename in originals_path.glob("*.json.gz")
-    )
+
 
 
 def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:

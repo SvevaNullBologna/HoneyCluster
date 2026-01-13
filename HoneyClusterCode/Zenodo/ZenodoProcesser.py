@@ -4,10 +4,12 @@ import logging
 import os
 import ijson
 import pandas as pd
+
 import Zenodo.ZenodoDataReader as ZDR
 import MachineLearning.HoneyClusterData as HCD
 from Zenodo.ZenodoDataReader import Cleaned_Attr
 
+from MachineLearning.command_vocabularies import get_all_known_verbs, get_recon_exploit_flat
 
 """
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -36,17 +38,27 @@ json iniziale:
         """
 
 
-def process_to_parquet(json_file: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
+def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: set[str] = None, all_recon: set[str] = None, all_exploit: set[str] = None): # * vedi spiegazione sul formato parquet in documenti
     if not os.path.exists(json_file):
         logging.warning(f"{json_file} does not exist")
         return
 
     all_sessions_in_file = []
 
+    if not all_known_verbs:
+        all_known_verbs = get_all_known_verbs()
+
+    if not all_recon or not all_exploit:
+        all_recon, all_exploit = get_recon_exploit_flat()
+
     with open(json_file, 'rb') as f:
-        for session_data in ijson.items(f, ''):
+
+
+        for session_data in ijson.items(f, 'item'):
             start_time = session_data[ZDR.Cleaned_Attr.START_TIME.value]
+            start_time = ZDR.get_datetime(start_time)
             end_time = session_data[ZDR.Cleaned_Attr.END_TIME.value]
+            end_time = ZDR.get_datetime(end_time)
             session_events = session_data[ZDR.Cleaned_Attr.EVENTS.value]
             if not session_events: continue
 
@@ -54,6 +66,7 @@ def process_to_parquet(json_file: Path, output_parquet: Path): # * vedi spiegazi
             timestamps = [] # tempi
             commands = [] # tunneling e comandi ssh
             verbs = [] # inizio dei comandi (utile per analisi, contiene anche quelli del tunneling)
+            user_pass = []
 
             for event in session_events:
                 status = event[Cleaned_Attr.STATUS.value]
@@ -68,17 +81,23 @@ def process_to_parquet(json_file: Path, output_parquet: Path): # * vedi spiegazi
                     if verb:
                         verbs.append(verb)
 
+                login_tuple = ZDR.get_tuple_login_data(event)
+                if login_tuple:
+                    user_pass.append(login_tuple)
+
             # qui posso già calcolare i valori voluti in HoneyClusterData:
+            [sin,cos] = HCD.get_time_of_day_patterns(start_time)
             data_obj = HCD.HoneyClusterData(
                 inter_command_timing=HCD.get_inter_command_timing(timestamps),
                 session_duration=HCD.get_session_duration(start_time, end_time),
-                time_of_day_patterns=HCD.get_time_of_day_patterns(start_time),
-                unique_commands_ratio=HCD.get_unique_commands_ratio(commands),
-                command_diversity_ratio=HCD.get_command_diversity_ratio(verbs),
-                tool_signatures=HCD.get_tool_signatures(verbs),
-                reconnaissance_vs_exploitation_ratio=HCD.get_reconnaissance_vs_exploitation_ratio(verbs),
+                time_of_day_patterns_sin= sin,
+                time_of_day_patterns_cos= cos,
+                unique_commands_ratio=HCD.get_unique_commands_ratio(verbs),
+                command_diversity_ratio=HCD.get_command_diversity_ratio(verbs, all_known_verbs),
+                tool_signatures=HCD.get_tool_signatures(statuses, verbs),
+                reconnaissance_vs_exploitation_ratio=HCD.get_reconnaissance_vs_exploitation_ratio(statuses, verbs, all_recon, all_exploit),
                 error_rate=HCD.get_error_rate(statuses),
-                command_correction_attempts=HCD.get_command_correction_attempts(statuses, commands)
+                command_correction_attempts=HCD.get_command_correction_attempts(statuses, commands, user_pass)
             )
 
             all_sessions_in_file.append(data_obj.__dict__)
@@ -107,6 +126,9 @@ def process_cleaned_dataset(base_folder_path: Path):
 
     resulting_path.mkdir(parents=True, exist_ok=True)
 
+    all_known_verbs = get_all_known_verbs()  # lo calcoliamo qui per efficienza (rifarlo per tutti i dati sarebbe un incubo
+    all_recon, all_exploit = get_recon_exploit_flat()
+
     for json_file in starting_path.glob("*.json"):
         parquet_output = resulting_path / json_file.with_suffix('.parquet').name
         if os.path.exists(parquet_output):
@@ -115,7 +137,7 @@ def process_cleaned_dataset(base_folder_path: Path):
 
         logging.info(f"Processing {json_file} ...")
         try:
-            process_to_parquet(json_file, parquet_output)
+            process_to_parquet(json_file, parquet_output, all_known_verbs, all_recon, all_exploit)
             logging.info(f"Completed {json_file}")
         except Exception as e:
             logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
@@ -174,7 +196,8 @@ def read_main_dataset(base_folder_path: Path) -> pd.DataFrame:
 
 if __name__ == "__main__":
     base_folder = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
-    json_path = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\cleaned\\2019-05-14.json")
-    process_to_parquet(json_path, base_folder / "processed")
-    #dataset = get_main_dataset_from_processed(base_folder)
+    #json_path = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\cleaned\\2019-05-14.json")
+    #process_to_parquet(json_path, base_folder / "processed")
+    process_cleaned_dataset(base_folder_path = base_folder)
+    dataset = get_main_dataset_from_processed(base_folder)
     print(read_main_dataset(base_folder))

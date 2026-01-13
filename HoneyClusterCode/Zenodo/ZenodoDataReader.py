@@ -1,61 +1,10 @@
-from enum import Enum
+
 import re
 from datetime import datetime
+from typing import Tuple
 
 from MachineLearning.command_vocabularies import FAST_CHECK_LONGER_VERBS, TLS_MAGIC, HTTP_VERBS
-
-
-class Status(Enum):
-    # login (per i bruteforce)
-    LOGIN_FAILED = 1
-    LOGIN_SUCCESS = 2
-    # tool signatures
-    VERSION = 3
-    FINGERPRINT = 4
-    #commands (negative to be able to distinguish them)
-    INPUT = -1
-    COMMAND_FAILED = -2
-    COMMAND_SUCCESS = -3
-    # tunneling
-    TCPIP_DATA = -4 # contains command, that's why it's negative
-    # no important info
-    IGNORED = 0
-
-
-class Event(Enum):
-    # login (per i bruteforce)
-    LOGIN_FAILED = "cowrie.login.failed"
-    LOGIN_SUCCESS = "cowrie.login.success"
-    # tool signatures
-    VERSION = "cowrie.client.version"
-    FINGERPRINT = "cowrie.client.fingerprint"
-    # tunneling
-    TCPIP_DATA = "cowrie.direct-tcpip.data"
-    # commands
-    INPUT = "cowrie.command.input"
-    COMMAND_FAILED = "cowrie.command.failed"
-    COMMAND_SUCCESS = "cowrie.command.success"
-
-class Useful_Cowrie_Attr(Enum):
-    EVENTID = "eventid"
-    TIME = "timestamp"
-    USER = "username"  # when login failed\success, fingerprint
-    PASS = "password" # when login failed\success
-    MSG = "message" # when Command input, failed, success, itcp request
-    VERSION = "ssh_client_version" # when version
-    FINGERPRINT = "fingerprint" # when fingerprint
-    DATA = "data" # when itcp data
-    GEO = "geolocation_data"
-
-class Cleaned_Attr(Enum):
-    STATUS = "status"
-    TIME = "timestamp"
-    START_TIME = "session_start"
-    END_TIME = "session_end"
-    EVENTS = "events"
-    MSG = "message"  # when Command input, failed, success, itcp request
-    DATA = "data"  # when itcp data
-
+from Zenodo.Zenodo_keys import Status, Event, Useful_Cowrie_Attr, Cleaned_Attr
 """
 /////////////////////////////////////////////////ALWAYS_USEFUL///////////////////////////////////////////////////////
 """
@@ -80,6 +29,8 @@ def get_datetime(timestamp: str) -> datetime | None:
         return None
 
 def get_interesting_data_by_status(status: int, event: dict) -> dict | None:
+    if is_login(status):
+        return get_login_data(event)
     if is_only_command(status):
         return get_command_data(event)
 
@@ -93,6 +44,19 @@ def get_interesting_data_by_status(status: int, event: dict) -> dict | None:
 """
 def is_login(status: int)-> bool:
     return status in [Status.LOGIN_FAILED.value, Status.LOGIN_SUCCESS.value]
+
+def get_login_data(event: dict) -> dict | None:
+    return {
+        Cleaned_Attr.USER.value : event.get(Useful_Cowrie_Attr.USER.value),
+        Cleaned_Attr.PASS.value : event.get(Useful_Cowrie_Attr.PASS.value)
+    }
+
+def get_tuple_login_data(event: dict) -> Tuple[str, str]| None:
+    user = event.get(Useful_Cowrie_Attr.USER.value)
+    password = event.get(Useful_Cowrie_Attr.PASS.value)
+    if not user and not password:
+        return None
+    return str(user),str(password)
 
 def count_logins(statuses: list[int]) -> int:
     if not statuses:
@@ -195,3 +159,4 @@ def get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comand
             return long_verb
 
     return cmd_clean.split()[0]
+

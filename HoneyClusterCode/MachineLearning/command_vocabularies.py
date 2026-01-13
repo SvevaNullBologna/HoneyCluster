@@ -78,3 +78,17 @@ def get_recon_exploit_flat():
     all_exploit = set().union(*_BEHAVIORAL_MAP["exploitation"].values())
 
     return all_recon, all_exploit
+
+def get_all_known_verbs():
+    verbs = set()
+
+    for sig_set in _SIGNATURES.values():
+        verbs.update(sig_set)
+
+    for phase in _BEHAVIORAL_MAP.values():
+        for sig_set in phase.values():
+            verbs.update(sig_set)
+
+    verbs.update(FAST_CHECK_LONGER_VERBS)
+
+    return verbs
