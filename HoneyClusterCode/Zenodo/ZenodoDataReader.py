@@ -2,6 +2,7 @@ from enum import Enum
 import re
 from datetime import datetime
 
+from MachineLearning.command_vocabularies import FAST_CHECK_LONGER_VERBS, TLS_MAGIC, HTTP_VERBS
 
 
 class Status(Enum):
@@ -104,6 +105,11 @@ def count_logins(statuses: list[int]) -> int:
 
 def is_version(status:int) -> bool:
     return status == Status.VERSION.value
+
+def count_versioning(statuses: list[int]) -> int:
+    if not statuses:
+        return 0
+    return sum(is_version(status) for status in statuses)
 """
 //////////////////////////////////////////////////GESTIONE FINGERPRINT///////////////////////////////////////////////
 """
@@ -113,33 +119,14 @@ def is_fingerprint(status:int) -> bool:
 """
 //////////////////////////////////////////////////GESTIONE TUNNELING/////////////////////////////////////////////////
 """
-"""def is_tunneling_request(status:int) -> bool:
-    return status == Status.TCPIP_REQUEST.value
-"""
-"""
-def get_tcpip_request_data(event_dict: dict):
-    # Cerca il pattern 'to [ID/IP]:[PORTA] from'
-    match = re.search(r'to\s+([^:]+):(\d+)\s+from', event_dict.get(Useful_Cowrie_Attr.MSG.value))
-    if not match:
-        return {
-            Cleaned_Attr.DST_ID.value : None,
-            Cleaned_Attr.DST_PORT.value: None
-        }
-
-    target_id = match.group(1)
-    target_port = int(match.group(2))
-    return {
-        Cleaned_Attr.DST_ID.value : target_id,
-        Cleaned_Attr.DST_PORT.value : target_port
-    }
-"""
-
-TLS_MAGIC = ("\\x16\\x03\\x00", "\\x16\\x03\\x01", "\\x16\\x03\\x02", "\\x16\\x03\\x03")
-HTTP_VERBS = ("GET", "POST", "HEAD", "PUT", "CONNECT", "OPTIONS", "PATCH")
-
 
 def is_tunneling_data(status:int) -> bool:
     return status == Status.TCPIP_DATA.value
+
+def count_tunneling(statuses: list[int]) -> int:
+    if not statuses:
+        return 0
+    return sum(is_tunneling_data(status) for status in statuses)
 
 def get_tcpip_data(event_dict: dict):
     raw = event_dict.get(Useful_Cowrie_Attr.DATA.value)
@@ -200,4 +187,12 @@ def get_command_data(event_dict: dict)-> dict | None:
 def get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
     # strip elimina gli spazi all'inizio e alla fine
     # split divide in sottostringhe secondo un delimitatore. Senza nulla dentro, divide per spazi
-    return cmd.strip().split()[0]
+    if not cmd:
+        return ""
+    cmd_clean = cmd.strip()
+    # 1. Controlliamo prima i "pezzi grossi"
+    for long_verb in FAST_CHECK_LONGER_VERBS:
+        if cmd_clean.startswith(long_verb):
+            return long_verb
+
+    return cmd_clean.split()[0]

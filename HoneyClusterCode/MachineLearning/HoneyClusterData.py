@@ -1,6 +1,11 @@
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+
+from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED
+from command_vocabularies import _SIGNATURES, SIGNATURE_WEIGHTS
+
+
 import Zenodo.ZenodoDataReader as ZDR
 from datetime import datetime
 
@@ -74,9 +79,6 @@ def get_time_of_day_patterns(start_time : datetime = None) -> float:
 """
 
 
-
-
-
 def get_unique_commands_ratio(verbs: list[str] = None)-> float:
     """ quanti comandi diversi ha usato l'attaccante durante una sessione. Si suppone che più ne usi, meno è probabile che si basi di un bot"""
     if not verbs: # non abbiamo informazioni
@@ -85,15 +87,14 @@ def get_unique_commands_ratio(verbs: list[str] = None)-> float:
 
     return len(unique_verbs) / len(verbs)
 
-def get_command_diversity_ratio(verbs: list[str] = None, all_known_verbs: set[str] = None)-> float:
+def get_command_diversity_ratio(verbs: list[str] = None, all_known_verbs: set[str] = None, bonus: float = 0.3)-> float:
     """ quanti strumenti diversi conosce l'attaccante -> più ne conosce più è bravo """
-    if not verbs:
-        return 0.0
+    if not verbs or not all_known_verbs: return 0.0
 
     unique_verbs = set(verbs)
     unknown_verbs = unique_verbs - all_known_verbs # è la differenza tra due insiemi, non tra numeri
-
-    return len(set(unique_verbs))/len(all_known_verbs) + len(unknown_verbs)/len(all_known_verbs) # premiamo quando non conosciamo il verbo usato
+    known_verbs = unique_verbs - unknown_verbs
+    return len(known_verbs)/len(all_known_verbs) + bonus * len(unknown_verbs)/len(all_known_verbs) # premiamo quando non conosciamo il verbo usato
 
 def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
     """ Calcola lo score di expertise basato sulle firme attivate -> quanto è bravo un attaccante a seconda dei tool usati """
@@ -104,21 +105,22 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
 
     if verbs:
         verbs_set = set(verbs)
-        # Stringa unica per beccare i comandi complessi (es. 'cat /etc/passwd')
-        full_session_text = " ".join(verbs).lower()
 
         for sig_name, sig_commands in _SIGNATURES.items():
             if any(cmd in verbs_set for cmd in sig_commands):
                 found_signatures.add(sig_name)
 
         # TUNNELING (Pattern matching su stringhe magiche)
-        if any(magic in full_session_text for magic in ZDR.TLS_MAGIC):
+        if any(v in TLS_MAGIC_CLEANED for v in verbs):
             found_signatures.add("tunneling_tls")
 
-        if any(h_verb.lower() in full_session_text for h_verb in ZDR.HTTP_VERBS):
+        if any(v in HTTP_VERBS_CLEANED for v in verbs):
             found_signatures.add("tunneling_http")
 
     if statuses:
+        if ZDR.Status.FINGERPRINT.value in statuses:
+            found_signatures.add("fingerprinting")
+
         login_occurrence = ZDR.count_logins(statuses)
         if len(statuses) > 0 and (login_occurrence / len(statuses) >= 0.6):
             found_signatures.add("login_occurrence")
@@ -133,16 +135,19 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
     EXTRACT BEHAVIORAL PATTERNS 
 """
 
-def get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
+def get_reconnaissance_vs_exploitation_ratio(statuses: list[int], verbs : list[str], all_recon: set, all_exploit: set)-> float:
     """ calcola il rapporto tra verbi di ricerca e verbi di attacco """
-    if not verbs:
-        return 0.5 # è un valore neutro. 0.0 significa recon, 1.0 significa exploitation
+    recon_count = 0
+    exploit_count = 0
 
-    all_recon = set().union(*_BEHAVIORAL_MAP["reconnaissance"].values() )
-    all_exploit = set().union(*_BEHAVIORAL_MAP["exploitation"].values() )
+    if statuses:
+        recon_count += ZDR.count_versioning(statuses)
+        recon_count += ZDR.count_logins(statuses)
+        exploit_count += ZDR.count_tunneling(statuses)
 
-    recon_count = sum(1 for v in verbs if v in all_recon)
-    exploit_count = sum(1 for v in verbs if v in all_exploit)
+    if verbs:
+        recon_count += sum(1 for v in verbs if v in all_recon)
+        exploit_count += sum(1 for v in verbs if v in all_exploit)
 
     total = recon_count + exploit_count
 
@@ -157,111 +162,38 @@ def get_error_rate(statuses: list[int] = None)-> float:
     if not statuses :
         return 0.0
 
-    fail_count = statuses.count(ZDR.Status.LOGIN_FAILED.value) + statuses.count(ZDR.Status.COMMAND_FAILED.value)
-
-    return - fail_count / len(statuses)
-
-def get_command_error_rate(statuses: list[int] = None)-> float:
-    # quante volte un comando fallisce? Pi
-    cmd_statuses = [status for status in statuses if ZDR.is_command(status)]
-    if not cmd_statuses:
+    attempts = [status for status in statuses if ZDR.is_only_command(status) or ZDR.is_login(status)]
+    # ignoriamo versioning e tunneling perché non sappiamo determinare se sono andati a buon fine
+    if not attempts:
         return 0.0
-    return cmd_statuses.count(ZDR.Status.LOGIN_FAILED.value) / len(cmd_statuses)
 
-def get_command_correction_attempts(statuses:list[int] = None, commands:list[str] = None)-> int:
+    failures = [attempt for attempt in attempts if attempt == ZDR.Status.COMMAND_FAILED.value or attempt == ZDR.Status.LOGIN_FAILED.value]
+
+    return - (len(failures) / len(attempts))
+
+def get_command_correction_attempts(statuses:list[int], commands:list[str])-> int:
     # be careful . Each status must belong to each command
-    if not statuses or not commands :
-        return 0
-    if len(statuses) != len(commands) or len(commands) < 2:
+    if not statuses or not commands or len(statuses)  < 2:
         return 0
 
     corrections = 0
 
-    for i in range(1, len(commands)):
-        if statuses[i-1] == ZDR.Status.COMMAND_FAILED.value:
-            similiarity = SequenceMatcher(None, commands[i-1], commands[i]).ratio()
+    has_eventually_logged_in = ZDR.Status.LOGIN_SUCCESS.value in statuses
 
-            if 0.6 <= similiarity < 1.0:
+    for i in range(1, len(commands)):
+        prev_status = statuses[i-1]
+        curr_status = statuses[i]
+        prev_cmd = commands[i-1]
+        curr_cmd = commands[i]
+
+        if has_eventually_logged_in:
+            if curr_status == ZDR.Status.LOGIN_FAILED.value:
+                corrections += 1
+
+        if ZDR.is_only_command(prev_status) and prev_status == ZDR.Status.COMMAND_FAILED.value:
+            similiarity = SequenceMatcher(None, prev_cmd, curr_cmd).ratio()
+            if 0.7 <= similiarity < 1.0:
                 corrections += 1
     return corrections
 
 
-"""
-/////////////////////////////////////////////VOCABULARY//////////////////////////////////////////////////
-"""
-
-_SIGNATURES = {
-    'file_system': {'ls', 'cd', 'pwd', 'which', 'find', 'du', 'stat'},
-    'file_reading': {'cat', 'head', 'tail', 'more', 'less'},
-    'system_info': {'uname', 'lscpu', 'free', 'uptime', 'hostname', 'df'},
-    'user_info': {'whoami', 'id', 'groups', 'last', 'w'},
-    'processes_env': {'ps', 'top', 'env', 'history', 'export', 'alias'},
-    'network': {'ifconfig', 'netstat', 'ip', 'route', 'arp', 'ping', 'nmap'},
-
-    'malware_download': {'wget', 'curl', 'tftp', 'ftp', 'scp', 'sftp'},
-    'priv_esc': {'sudo', 'chmod', 'chown', 'su', 'visudo'},
-    'scripting_exec': {'sh', 'bash', 'python', 'python3', 'perl', 'php', 'gcc', 'make'},
-    'persistence_mod': {'crontab', 'mkdir', 'touch', 'echo', 'rm', 'mv', 'cp', 'ln'},
-    'defense_evasion': {'pkill', 'kill', 'killall', 'unset', 'iptables', 'ufw'},
-
-    # Firme Specifiche (Comandi complessi o pattern)
-    'discovery': {'cat /etc/passwd', 'cat /etc/shadow'},  # Qui usiamo stringhe intere
-    'cleanup': {'history -c', 'rm -rf', 'unset HISTFILE'},
-    'scanning': {'nmap', 'masscan', 'zmap'}
-}
-
-# Quanto è esperto un attaccante in base a una signature
-SIGNATURE_WEIGHTS = {
-    'file_system': 1.0,
-    'system_info': 1.2,
-    'user_info': 1.2,
-    'processes_env': 2.0,
-    'file_reading': 2.0,
-    'network': 2.2,
-    'scanning': 2.2,
-    'discovery': 2.5,
-    'download': 2.5,
-    'malware_download': 3.0,
-    'cleanup': 3.0,
-    'persistence_mod': 3.5,
-    'scripting_exec': 3.5,
-    'priv_esc': 3.8,
-    'defense_evasion': 4.0,
-    'login_occurrence': 1.0,  # Gestito dagli status
-    'tunneling_http': 3.5,  # Gestito dai magic bytes
-    'tunneling_tls': 4.5  # Gestito dai magic bytes
-}
-
-_BEHAVIORAL_MAP = {
-    "reconnaissance": {
-        "file_system": {"ls", "cd", "pwd", "which", "find", "du", "stat"},
-        "file_reading": {"cat", "head", "tail", "more", "less"},
-        "system_info": {"uname", "lscpu", "free", "uptime", "hostname", "df"},
-        "user_info": {"whoami", "id", "groups", "last", "w"},
-        "processes_env": {"ps", "top", "env", "history", "export", "alias"},
-        "network": {"ifconfig", "netstat", "ip", "route", "arp", "ping"}
-    },
-    "exploitation": {
-        "malware_download": {"wget", "curl", "tftp", "ftp", "scp", "sftp"},
-        "priv_esc": {"chmod", "chown", "sudo", "su", "visudo"},
-        "scripting_exec": {"sh", "bash", "python", "python3", "perl", "php", "gcc", "make"},
-        "persistence_mod": {"crontab", "mkdir", "touch", "echo", "rm", "mv", "cp", "ln"},
-        "defense_evasion": {"pkill", "kill", "killall", "unset", "iptables", "ufw"}
-    }
-}
-
-
-def get_all_known_verbs()-> set:
-    commands = set()
-
-    # Estrazione da BEHAVIORAL_MAP
-    # Usiamo .values() per scendere nei livelli senza dover richiamare le chiavi
-    for families in _BEHAVIORAL_MAP.values():
-        for cmd_set in families.values():
-            commands.update(cmd_set) # update per aggiungere collezioni di elementi alla lista
-
-    # Estrazione da SIGNATURES
-    for cmd_set in _SIGNATURES.values():
-        commands.update(cmd_set)
-
-    return commands
