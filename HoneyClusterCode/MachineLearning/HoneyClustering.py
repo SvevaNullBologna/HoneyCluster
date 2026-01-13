@@ -3,15 +3,15 @@ from pathlib import Path
 
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from hdbscan import HDBSCAN
+from sklearn.cluster import KMeans
 
-from HoneyClusterData import read_main_dataset
+from Zenodo.ZenodoProcesser import read_main_dataset
 
 from joblib import dump,load
 
 _ARTIFACTS = "C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\artifacts"
 _SCALER_PATH = Path(_ARTIFACTS,"scaler_honeypot.joblib")
-_MODEL_PATH = Path(_ARTIFACTS,"hdbscan_model.joblib")
+_MODEL_PATH = Path(_ARTIFACTS,"kmeans_model.joblib")
 _CORE_DATASET_PATH = Path(_ARTIFACTS,"core_dataset.parquet")
 
 def _extraction_of_initial_clustering_subset(base_folder_path: Path, n_samples: int = 200000) -> pd.DataFrame:
@@ -50,7 +50,7 @@ def _get_model():
 def _save_scaler(scaler: StandardScaler):
     dump(scaler, _SCALER_PATH)
 
-def _save_model(model: HDBSCAN):
+def _save_model(model: KMeans):
     dump(model, _MODEL_PATH)
 
 def _build_scaled_core_model(core_dataset: pd.DataFrame, old_scaler : StandardScaler = None): # scaliamo i dati per evitare che dei valori troppo grandi sovrastino gli altri
@@ -66,17 +66,18 @@ def _build_scaled_core_model(core_dataset: pd.DataFrame, old_scaler : StandardSc
 
     return scaled # restituiamo i dati scalati
 
-def _clustering(scaled_core, model: HDBSCAN = None):
+def _clustering(scaled_core, model: KMeans = None):
     if not model:
-        model = HDBSCAN(
-            min_cluster_size = 50,
-            prediction_data = True, # crea una struttura dati extra durante il training
-            core_dist_n_jobs = -1 # permette l'utilizzo di più core possibili
+        model = KMeans(
+            n_clusters=3,
+            init="k-means++", #sceglie come centroidi i punti più lontani tra loro
+            n_init=10, #evita che l'algoritmo si blocchi in soluzioni non ottimali
+            max_iter=300, # max tentativi per esecuzione
+            random_state=42 # componente altresì casuale. Rende i risultati riproducibili
         )
-
-    model.fit(scaled_core) # restituisce l'oggetto modello stesso, non le labels come in sklearn
-
-    labels = model.labels_ # le labels si trovano nell'attributo labels
+        labels = model.fit(scaled_core)
+    else:
+        labels = model.predict(scaled_core) # restituisce l'oggetto modello stesso, non le labels come in sklearn
 
     _save_model(model)
 
@@ -110,10 +111,15 @@ def complete_clustering_pipeline(base_folder_path: Path):
         print(e)
         return None
 
+
 def analysis_of_cluster(resulting_dataset: pd.DataFrame):
-    return resulting_dataset.groupby('cluster_id').count()
+    # Raggruppiamo per cluster e calcoliamo la media delle feature comportamentali
+    stats = resulting_dataset.groupby('cluster_id').mean()
 
+    # Aggiungiamo il conteggio per vedere la popolosità
+    stats['count'] = resulting_dataset.groupby('cluster_id').size()
 
+    return stats
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
