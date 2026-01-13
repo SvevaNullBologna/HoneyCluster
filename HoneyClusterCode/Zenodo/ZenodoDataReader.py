@@ -11,14 +11,12 @@ class Status(Enum):
     # tool signatures
     VERSION = 3
     FINGERPRINT = 4
-    # tunneling
-    TCPIP_REQUEST = 5 # dst = null, data_len = 0
-    TCPIP_DATA = 6 # same
     #commands (negative to be able to distinguish them)
     INPUT = -1
     COMMAND_FAILED = -2
     COMMAND_SUCCESS = -3
-
+    # tunneling
+    TCPIP_DATA = -4 # contains command, that's why it's negative
     # no important info
     IGNORED = 0
 
@@ -31,7 +29,6 @@ class Event(Enum):
     VERSION = "cowrie.client.version"
     FINGERPRINT = "cowrie.client.fingerprint"
     # tunneling
-    TCPIP_REQUEST = "cowrie.direct-tcpip.request"
     TCPIP_DATA = "cowrie.direct-tcpip.data"
     # commands
     INPUT = "cowrie.command.input"
@@ -56,18 +53,8 @@ class Cleaned_Attr(Enum):
     END_TIME = "session_end"
     COUNT = "raw_event_count"
     EVENTS = "events"
-    GEO = "geo"
-    USER = "username"  # when login failed\success, fingerprint
-    PASS = "password"  # when login failed\success
     MSG = "message"  # when Command input, failed, success, itcp request
-    VERSION = "ssh_client_version"  # when version
-    FINGERPRINT = "fingerprint"  # when fingerprint
     DATA = "data"  # when itcp data
-    DST_ID = "dst_ip_identifier" # when itcp request
-    DST_PORT = "dst_port" # when itcp request
-    HOST = "host" # when itcp data
-    USER_AGENT = "user_agent" # when itcp data
-    ACCEPT = "accept" # when itcp data
 
 """
 /////////////////////////////////////////////////ALWAYS_USEFUL///////////////////////////////////////////////////////
@@ -92,21 +79,12 @@ def get_datetime(timestamp: str) -> datetime | None:
     except ValueError:
         return None
 
-def get_data_by_status(status: int, event: dict) -> dict | None:
-    if is_login(status):
-        return get_login_data(event)
-
-    if is_command(status):
+def get_interesting_data_by_status(status: int, event: dict) -> dict | None:
+    if is_only_command(status):
         return get_command_data(event)
 
-    if is_version(status):
-        return get_version_data(event)
-    if is_fingerprint(status):
-        return get_fingerprint_data(event)
-    if is_tunneling_request(status):
-        return get_tcpip_request_data(event)
     if is_tunneling_data(status):
-        return get_tcpip_data_data(event)
+        return get_tcpip_data(event)
     return None
 
 
@@ -116,48 +94,25 @@ def get_data_by_status(status: int, event: dict) -> dict | None:
 def is_login(status: int)-> bool:
     return status in [Status.LOGIN_FAILED.value, Status.LOGIN_SUCCESS.value]
 
-def get_login_data(event_dict: dict):
-    return {
-        Cleaned_Attr.USER.value: event_dict.get(Useful_Cowrie_Attr.USER.value),
-        Cleaned_Attr.PASS.value: event_dict.get(Useful_Cowrie_Attr.PASS.value)
-    }
 """
 //////////////////////////////////////////////////GESTIONE VERSION///////////////////////////////////////////////////
 """
 
 def is_version(status:int) -> bool:
     return status == Status.VERSION.value
-
-def get_version_data(event_dict: dict) -> dict:
-    v = event_dict.get(Useful_Cowrie_Attr.VERSION.value)
-    if v:
-        # Pulizia della stringa b'SSH-2.0...' -> SSH-2.0...
-        v = clean_version_data(v)
-        return {Useful_Cowrie_Attr.VERSION.value: v}
-    return {}
-
-def clean_version_data(version: str) -> str:
-   return  re.sub(r"^b['\"]|['\"]$", "", str(version))
 """
 //////////////////////////////////////////////////GESTIONE FINGERPRINT///////////////////////////////////////////////
 """
 def is_fingerprint(status:int) -> bool:
     return status == Status.FINGERPRINT.value
 
-def get_fingerprint_data(event_dict: dict) -> dict:
-    return {
-        Cleaned_Attr.FINGERPRINT.value: event_dict.get(Useful_Cowrie_Attr.FINGERPRINT.value),
-        Cleaned_Attr.USER.value : event_dict.get(Useful_Cowrie_Attr.USER.value)
-    }
-
 """
 //////////////////////////////////////////////////GESTIONE TUNNELING/////////////////////////////////////////////////
 """
-def is_tunneling_request(status:int) -> bool:
+"""def is_tunneling_request(status:int) -> bool:
     return status == Status.TCPIP_REQUEST.value
-def is_tunneling_data(status:int) -> bool:
-    return status == Status.TCPIP_DATA.value
-
+"""
+"""
 def get_tcpip_request_data(event_dict: dict):
     # Cerca il pattern 'to [ID/IP]:[PORTA] from'
     match = re.search(r'to\s+([^:]+):(\d+)\s+from', event_dict.get(Useful_Cowrie_Attr.MSG.value))
@@ -173,9 +128,16 @@ def get_tcpip_request_data(event_dict: dict):
         Cleaned_Attr.DST_ID.value : target_id,
         Cleaned_Attr.DST_PORT.value : target_port
     }
+"""
+
+TLS_MAGIC = ("\\x16\\x03\\x00", "\\x16\\x03\\x01", "\\x16\\x03\\x02", "\\x16\\x03\\x03")
+HTTP_VERBS = ("GET", "POST", "HEAD", "PUT", "CONNECT", "OPTIONS", "PATCH")
 
 
-def get_tcpip_data_data(event_dict: dict):
+def is_tunneling_data(status:int) -> bool:
+    return status == Status.TCPIP_DATA.value
+
+def get_tcpip_data(event_dict: dict):
     raw = event_dict.get(Useful_Cowrie_Attr.DATA.value)
     if not raw:
         return {}  # Ritorna dizionario vuoto invece di mille None
@@ -187,24 +149,35 @@ def get_tcpip_data_data(event_dict: dict):
     # Inizializziamo solo ciò che troviamo
     data_extracted = {}
     if lines:
-        data_extracted[Cleaned_Attr.MSG.value] = lines[0]
-
-    for line in lines:
-        line_lower = line.lower()
-        if line_lower.startswith("host:"):
-            data_extracted[Cleaned_Attr.HOST.value] = line.split(":", 1)[1].strip()
-        elif line_lower.startswith("user-agent:"):
-            data_extracted[Cleaned_Attr.USER_AGENT.value] = line.split(":", 1)[1].strip()
-        elif line_lower.startswith("accept:"):
-            data_extracted[Cleaned_Attr.ACCEPT.value] = line.split(":", 1)[1].strip()
+        data_extracted[Cleaned_Attr.MSG.value] = clean_tcip_message(lines[0])
 
     return data_extracted
+
+def clean_tcip_message(message: str) -> str:
+    if not message:
+        return ""
+    msg = message.strip()
+
+    if msg.startswith("b'") and msg.endswith("'"):
+        msg = msg[2:-1]
+
+    if msg.startswith(TLS_MAGIC):
+        return "TLS_PROBE"
+
+    for verb in HTTP_VERBS: # sappiamo che è HTTP
+        if msg.startswith(verb + " "):
+            return f"HTTP_{verb}"
+
+    return "UNKNOWN_PROBE"
 
 """
 //////////////////////////////////////////////////GESTIONE COMANDI///////////////////////////////////////////////////
 """
 def is_command(status: int) -> bool:
     return status < 0
+
+def is_only_command(status: int) -> bool:
+    return status < 0 and status != Status.TCPIP_DATA.value
 
 def isolate_command(message: str) -> str:
     s = message.strip()
@@ -213,6 +186,14 @@ def isolate_command(message: str) -> str:
 
 def get_command_data(event_dict: dict)-> dict | None:
     msg = event_dict.get(Useful_Cowrie_Attr.MSG.value)
+    if not msg:
+        return {}
     return {
         Cleaned_Attr.MSG.value : isolate_command(msg)
     }
+
+
+def get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
+    # strip elimina gli spazi all'inizio e alla fine
+    # split divide in sottostringhe secondo un delimitatore. Senza nulla dentro, divide per spazi
+    return cmd.strip().split()[0]

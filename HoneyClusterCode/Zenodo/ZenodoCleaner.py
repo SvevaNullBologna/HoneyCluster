@@ -21,10 +21,10 @@ def set_working_folder(zenodo_local_path: Path):
 
 
 def extract_and_clean_all_zenodo_logs_in_folder(originals_path: Path, cleaned_path: Path) -> bool:
-    completed = False
-    for filename in originals_path.glob("*.json.gz"):
-        completed &= clean_zenodo_gz(filename, cleaned_path)
-    return completed
+    return all(
+        clean_zenodo_gz(filename, cleaned_path)
+        for filename in originals_path.glob("*.json.gz")
+    )
 
 
 def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
@@ -39,27 +39,24 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
         logging.info(f"cleaning {log_date} to {out_file}")
 
         with gzip.open(gz_path, "rb") as f, open(out_file, "w", encoding="utf-8") as out:
-            out.write('{\n  "sessions": {')
+            out.write('[\n')  # inizio lista JSON
             first_session = True
 
             # Iteriamo sugli oggetti principali del JSON
             for session in ijson.items(f, "item"):
-                # Ogni 'session' è un dict { session_id: [events] }
-                for session_id, events in session.items():
+                for _, events in session.items():  # ignoriamo session_id
                     if not events:
                         continue
 
                     cleaned_events = []
                     has_real_activity = False
 
-                    # Processiamo ogni evento della sessione
                     for e in events:
                         ce = _clean_event(e)
                         if ce:
                             cleaned_events.append(ce)
                             has_real_activity = True
 
-                    # SCRIVIAMO LA SESSIONE (Spostato dentro il ciclo corretto)
                     if has_real_activity:
                         session_data = {
                             ZK.Cleaned_Attr.START_TIME.value: events[0].get(ZK.Useful_Cowrie_Attr.TIME.value),
@@ -69,13 +66,14 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
                         }
 
                         if not first_session:
-                            out.write(",")
+                            out.write(",\n")
 
-                        out.write(f'\n    "{session_id}": ')
-                        json.dump(session_data, out, ensure_ascii=False)
+                        # scriviamo la sessione direttamente
+                        out.write(json.dumps(session_data, ensure_ascii=False))
                         first_session = False
 
-            out.write('\n  }\n}')
+            out.write('\n]')  # chiusura lista JSON
+
         return True
 
     except Exception as e:
@@ -83,6 +81,7 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
         if out_file.exists():
             out_file.unlink()
         return False
+
 
 def get_zenodo_log_list(cleaned_path: Path):
     logging.info("getting Zenodo log list")
@@ -133,7 +132,7 @@ def _check_directory(path: Path | None, creation: bool) -> bool:
         return True
 
 
-def _clean_event(e:dict, add_geolocation: bool = False) -> dict | None: # elimina i None, converte i Decimal in Float ed elimina session id che è già usato come chiave
+def _clean_event(e:dict) -> dict | None: # elimina i None, converte i Decimal in Float ed elimina session id che è già usato come chiave
     eventid = e.get(ZK.Useful_Cowrie_Attr.EVENTID.value)
     if not eventid:
         return None
@@ -147,27 +146,12 @@ def _clean_event(e:dict, add_geolocation: bool = False) -> dict | None: # elimin
         ZK.Cleaned_Attr.TIME.value: e.get(ZK.Useful_Cowrie_Attr.TIME.value)
     }
 
-    specific_data = ZK.get_data_by_status(status,e)
+    specific_data = ZK.get_interesting_data_by_status(status, e)
     if specific_data:
         cleaned.update(specific_data)
 
-
-    #geolocalizzazione opzionale
-    if add_geolocation:
-        geo = e.get(ZK.Useful_Cowrie_Attr.GEO.value)
-        geo_clean = _clean_geolocation(geo)
-        if geo_clean:
-            cleaned[ZK.Cleaned_Attr.GEO.value] = geo_clean
-
     return _convert_decimals(cleaned)
 
-def _clean_geolocation(geo:dict) -> dict | None: # mantiene solo campi validi e converte Decimal -> float
-    if not geo:
-        return None
-
-    keep_keys = {"country_name", "city_name", "latitude", "longitude"}
-    geo_clean = {k: float(v) if type(v).__name__ == "Decimal" else v for k,v in geo.items() if k in keep_keys and v is not None}
-    return geo_clean if geo_clean else None
 
 def _convert_decimals(obj):
     if isinstance(obj, dict):

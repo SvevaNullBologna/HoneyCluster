@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-
+import Zenodo.ZenodoDataReader as ZDR
 from datetime import datetime
 
 
@@ -46,28 +46,33 @@ def get_inter_command_timing(command_times: list[datetime] = None) -> float:
     if not command_times or len(command_times) < 2:
         return 0.0 # non abbiamo informazioni
 
+    sorted_times = sorted(command_times) # ordiniamo per robustezza (anche se di solito sono già ordinati)
+
     deltas = [ # lista delle sottrazioni dei tempi dei comandi
-        (command_times[i+1] - command_times[i]).total_seconds()
-        for i in range(len(command_times) - 1)
+        (sorted_times[i+1] - sorted_times[i]).total_seconds()
+        for i in range(len(sorted_times) - 1)
     ]
 
     return sum(deltas) / len(deltas) # restituisce la media
 
-def get_session_duration(times: list[datetime] = None) -> float:
+def get_session_duration(start_time: str | datetime = None, end_time: str | datetime = None) -> float:
     """ durata totale della sessione in secondi """
-    if not times or len(times) < 2:
+    if not start_time or not end_time:
         return 0.0
-    return (max(times) - min(times)).total_seconds()
 
-def get_time_of_day_patterns(times: list[datetime] = None) -> float:
+    t1 = start_time if isinstance(start_time, datetime) else datetime.fromisoformat(start_time.replace("Z","+00:00"))
+    t2 = end_time if isinstance(end_time, datetime) else datetime.fromisoformat(end_time.replace("Z","+00:00"))
+    return (t2 - t1).total_seconds()
+
+def get_time_of_day_patterns(start_time : str | datetime = None) -> float:
     """ otteniamo l'abitudine oraria dell'attaccante """
-    if not times: # se non abbiamo informazioni
+    if not start_time: # se non abbiamo informazioni
         return 0.0
 
     # il timestamp in zenodo è universale, quindi non dobbiamo attenzionare la posizione geografica
-    hours = [t.hour + t.minute / 60 for t in times] # calcoliamo una lista con le ore in cui attacca
-    avg_hour = sum(hours) / len(hours)
-    return avg_hour / 24 # se il valore è vicino a 0, sta attaccando di notte, alle 0.5 è pomeriggio
+    t1 = start_time if isinstance(start_time, datetime) else datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+    start_hour = t1.hour + (t1.minute / 60.0)
+    return start_hour / 24.0
 
 """
     EXTRACT COMMAND BASED FEATURES
@@ -142,7 +147,7 @@ def get_tool_signatures(verbs: list[str] = None)-> float:
 def get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
     """ calcola il rapporto tra verbi di ricerca e verbi di attacco """
     if not verbs:
-        return 0.0
+        return 0.5 # è un valore neutro. 0.0 significa recon, 1.0 significa exploitation
 
     all_recon = set().union(*_BEHAVIORAL_MAP["reconnaissance"].values() )
     all_exploit = set().union(*_BEHAVIORAL_MAP["exploitation"].values() )
@@ -150,45 +155,43 @@ def get_reconnaissance_vs_exploitation_ratio(verbs : list[str] = None)-> float:
     recon_count = sum(1 for v in verbs if v in all_recon)
     exploit_count = sum(1 for v in verbs if v in all_exploit)
 
-    if exploit_count == 0: # se non c'è exploitation, il rapporto è basato solo sulla recon
-        return float(recon_count)
+    total = recon_count + exploit_count
 
-    return recon_count / exploit_count
+    if total == 0:
+        return 0.5
+
+    return exploit_count / total
 
 
 def get_error_rate(statuses: list[int] = None)-> float:
     if not statuses :
         return 0.0
 
-    return statuses.count(0) / len(statuses)
+    fail_count = statuses.count(ZDR.Status.LOGIN_FAILED.value) + statuses.count(ZDR.Status.COMMAND_FAILED.value)
 
+    return fail_count / len(statuses)
 
-def get_command_correction_attempts(statuses: list[str] = None, commands: list[str] = None)-> int:
+def get_command_error_rate(statuses: list[int] = None)-> float:
+    cmd_statuses = [status for status in statuses if ZDR.is_command(status)]
+    if not cmd_statuses:
+        return 0.0
+    return cmd_statuses.count(ZDR.Status.LOGIN_FAILED.value) / len(cmd_statuses)
 
-    cmd_statuses = [s for s in statuses if s != -1] # la lunghezza dovrebbe matchare quella della lista dei comandi
-
-    if len(commands) < 2 or len (cmd_statuses) != len(commands) :
+def get_command_correction_attempts(statuses:list[int] = None, commands:list[str] = None)-> int:
+    # be careful . Each status must belong to each command
+    if not statuses or not commands :
+        return 0
+    if len(statuses) != len(commands) or len(commands) < 2:
         return 0
 
     corrections = 0
+
     for i in range(1, len(commands)):
-        if cmd_statuses[i-1] == 0 :
-            # calcoliamo quanto il comando attuale è simile al precedente
-            similarity = SequenceMatcher(None, commands[i-1], commands[i]).ratio()
+        if statuses[i-1] == ZDR.Status.COMMAND_FAILED.value:
+            similiarity = SequenceMatcher(None, commands[i-1], commands[i]).ratio()
 
-            if 0.6 <= similarity < 1.0 : # se le similitudini vanno dal 60% a salire, è una correzione
+            if 0.6 <= similiarity < 1.0:
                 corrections += 1
-
     return corrections
-"""
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                    UTILITIES
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-"""
-
-def get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
-    # strip elimina gli spazi all'inizio e alla fine
-    # split divide in sottostringhe secondo un delimitatore. Senza nulla dentro, divide per spazi
-    return cmd.strip().split()[0]
 
 

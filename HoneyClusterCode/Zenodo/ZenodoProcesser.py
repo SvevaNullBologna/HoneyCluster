@@ -5,6 +5,7 @@ import os
 import ijson
 import pandas as pd
 import Zenodo.ZenodoDataReader as ZDR
+import MachineLearning.HoneyClusterData as HCD
 from Zenodo.ZenodoDataReader import Cleaned_Attr
 
 
@@ -16,8 +17,7 @@ from Zenodo.ZenodoDataReader import Cleaned_Attr
 """
 json iniziale:
 
-        {
-            "sessions":
+        [
             {
                 "session_start" : str,
                 "session_end" : str,
@@ -27,90 +27,65 @@ json iniziale:
                             {
                                 "status" : int,
                                 "timestamp" : str,
-                                * valori che dipendono dallo status
-                            }
+                                "message" : str        * occasionalmente
+                            },
+                            ...
                 ]
-                ...
             }
             ...
-        }
+        ]
         """
 
 
 def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
-
-
     if not os.path.exists(json_path):
+        logging.warning(f"{json_path} does not exist")
         return
 
     all_sessions_in_file = []
 
     with open(json_path, 'rb') as f:
-        for session_id, session_data in ijson.kvitems(f, 'sessions'):
-            session_start_time = session_data['session_start']
-            session_end_time = session_data['session_end']
-            session_number_of_events = session_data['raw_event_count']
-            session_events = session_data['events']
+        for session_data in ijson.items(f, ''):
+            start_time = session_data[ZDR.Cleaned_Attr.START_TIME.value]
+            end_time = session_data[ZDR.Cleaned_Attr.END_TIME.value]
+            number_of_events = session_data[ZDR.Cleaned_Attr.COUNT.value]
+            session_events = session_data[ZDR.Cleaned_Attr.EVENTS.value]
             if not session_events: continue
 
             timestamps, commands, verbs, statuses = [],[],[],[]
 
             for event in session_events:
-                status = event[Cleaned_Attr.STATUS]
-                timestamp = event[Cleaned_Attr.TIME]
+                status = event[Cleaned_Attr.STATUS.value]
+                timestamp = event[Cleaned_Attr.TIME.value]
 
                 statuses.append(status)
                 timestamps.append(timestamp)
 
                 if ZDR.is_command(status):
                     cmd = event.get(Cleaned_Attr.MSG.value)
-            return
-"""
-# estrazione immediata dei dati necessari dalla sessione corrente
-            events = session_data.get('events',[])
-            if not events:
-                continue
-
-            timestamps = commands = verbs = statuses = []
-            ssh_version = None
-
-            for e in events:
-                status = e.get('status')
-
-                statuses.append(status)
-                timestamps.append(time)
-                # estraiamo i cambi base
-                if zdr.is_command(status):
-                    cmd = e.get('msg')
-                    if cmd :
+                    if cmd:
                         commands.append(cmd)
-                        verbs.append(HCD.get_verb_of_command(cmd))
-
-                if zdr.is_version(status):
-                    ssh_version = e.get('version')
-
+                        verbs.append(ZDR.get_verb_of_command(cmd))
 
             # qui posso già calcolare i valori voluti in HoneyClusterData:
-            data_obj = HCD.Honey(
+            data_obj = HCD.HoneyClusterData(
                 inter_command_timing=HCD.get_inter_command_timing(timestamps),
-                session_duration=HCD.session_duration(start_time, end_time),
-                time_of_day_patterns=HCD.get_time_of_day_patterns(timestamps),
+                session_duration=HCD.get_session_duration(start_time, end_time),
+                time_of_day_patterns=HCD.get_time_of_day_patterns(start_time),
                 unique_commands_ratio=HCD.get_unique_commands_ratio(commands),
                 command_diversity_ratio=HCD.get_command_diversity_ratio(verbs),
                 tool_signatures=HCD.get_tool_signatures(verbs),
                 reconnaissance_vs_exploitation_ratio=HCD.get_reconnaissance_vs_exploitation_ratio(verbs),
                 error_rate=HCD.get_error_rate(statuses),
-                command_correction_attempts =HCD.get_command_correction_attempts(statuses, commands)
+                command_correction_attempts=HCD.get_command_correction_attempts(statuses, commands)
             )
 
-            row = data_obj.__dict__
-            row['session_id'] = session_id
-            all_sessions_in_file.append(row)
+            all_sessions_in_file.append(data_obj.__dict__)
 
-        if all_sessions_in_file:
-            df = pd.DataFrame(all_sessions_in_file)
-            df.to_parquet(output_parquet, engine='fastparquet', index=False)
-"""
+    if all_sessions_in_file:
+        df = pd.DataFrame(all_sessions_in_file)
+        df.to_parquet(output_parquet, engine='fastparquet', index=False)
+        logging.info(f"Saved {len(df)} sessions to {output_parquet}")
 
 """
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
