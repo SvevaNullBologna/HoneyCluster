@@ -52,7 +52,6 @@ class Cleaned_Attr(Enum):
     TIME = "timestamp"
     START_TIME = "session_start"
     END_TIME = "session_end"
-    COUNT = "raw_event_count"
     EVENTS = "events"
     MSG = "message"  # when Command input, failed, success, itcp request
     DATA = "data"  # when itcp data

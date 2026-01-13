@@ -61,7 +61,6 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
                         session_data = {
                             ZK.Cleaned_Attr.START_TIME.value: events[0].get(ZK.Useful_Cowrie_Attr.TIME.value),
                             ZK.Cleaned_Attr.END_TIME.value: events[-1].get(ZK.Useful_Cowrie_Attr.TIME.value),
-                            ZK.Cleaned_Attr.COUNT.value: len(events),
                             ZK.Cleaned_Attr.EVENTS.value: cleaned_events
                         }
 

@@ -1,13 +1,15 @@
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
+from typing import Tuple
 
-from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED
+from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED, MAX_SIGNATURE_SCORE
 from command_vocabularies import _SIGNATURES, SIGNATURE_WEIGHTS
 
 
 import Zenodo.ZenodoDataReader as ZDR
 from datetime import datetime
+import math
 
 """
 DALLA CONSEGNA:
@@ -34,7 +36,7 @@ class HoneyClusterData:
     # behavioral patterns
     reconnaissance_vs_exploitation_ratio: float #numero comandi di esplorazione vs numero comandi attivi e intrusivi
     error_rate: float # comandi errati / comandi
-    command_correction_attempts: int # quante volte in media l'attaccante cerca di correggersi
+    command_correction_attempts: float # quante volte in media l'attaccante cerca di correggersi
 
 """
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -45,7 +47,7 @@ class HoneyClusterData:
     EXTRACT TEMPORAL FEATURES
 """
 
-def get_inter_command_timing(command_times: list[datetime] = None) -> float:
+def get_inter_command_timing(command_times: list[datetime] = None) -> float: # consideriamo in questo caso anche fingerprint, tunneling, version e login -> tutti gli eventi interessanti già selezionati nella fase di cleaning
     """ otteniamo il tempo medio tra un comando e l'altro """
     if not command_times or len(command_times) < 2:
         return 0.0 # non abbiamo informazioni
@@ -65,21 +67,24 @@ def get_session_duration(start_time: datetime = None, end_time: datetime = None)
         return 0.0
     return (end_time - start_time).total_seconds()
 
-def get_time_of_day_patterns(start_time : datetime = None) -> float:
-    """ otteniamo l'abitudine oraria dell'attaccante, ovvero in che ora della giornata attacca? """
+def get_time_of_day_patterns(start_time : datetime = None) -> Tuple[float,float]:
+    """ otteniamo l'abitudine oraria dell'attaccante, ovvero in che ora della giornata attacca?
+        Viene restituito l'orario su un cerchio unitario per evitare il problema 23:59 -> 0.99 , 00:01 -> 0.0007
+     """
     if not start_time: # se non abbiamo informazioni
-        return 0.0
+        return 0.0, 0.0
 
     # il timestamp in zenodo è universale, quindi non dobbiamo attenzionare la posizione geografica
-    start_hour = start_time.hour + (start_time.minute / 60.0)
-    return start_hour / 24.0
+    hour_decimal = start_time.hour + (start_time.minute / 60.0) + (start_time.second / 3600.0)
+    angle = math.tau * (hour_decimal / 24.0)
+    return math.sin(angle), math.cos(angle)
 
 """
     EXTRACT COMMAND BASED FEATURES
 """
 
 
-def get_unique_commands_ratio(verbs: list[str] = None)-> float:
+def get_unique_commands_ratio(verbs: list[str] = None)-> float: #solo tunneling e comandi effettivi ssh
     """ quanti comandi diversi ha usato l'attaccante durante una sessione. Si suppone che più ne usi, meno è probabile che si basi di un bot"""
     if not verbs: # non abbiamo informazioni
         return 0.0
@@ -129,7 +134,7 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
         return 0.0
 
     # Restituiamo la somma dei pesi per differenziare la "bravura"
-    return sum(SIGNATURE_WEIGHTS.get(sig, 1.0) for sig in found_signatures)
+    return sum(SIGNATURE_WEIGHTS.get(sig, 1.0) for sig in found_signatures) / MAX_SIGNATURE_SCORE
 
 """
     EXTRACT BEHAVIORAL PATTERNS 
@@ -154,7 +159,7 @@ def get_reconnaissance_vs_exploitation_ratio(statuses: list[int], verbs : list[s
     if total == 0:
         return 0.5
 
-    return exploit_count / total
+    return exploit_count / total # 0 = puro recon, 1 = puro exploit
 
 
 def get_error_rate(statuses: list[int] = None)-> float:
@@ -171,29 +176,23 @@ def get_error_rate(statuses: list[int] = None)-> float:
 
     return - (len(failures) / len(attempts))
 
-def get_command_correction_attempts(statuses:list[int], commands:list[str])-> int:
-    # be careful . Each status must belong to each command
-    if not statuses or not commands or len(statuses)  < 2:
+def get_command_correction_attempts(statuses:list[int], commands:list[str])-> float:
+    statuses = [status for status in statuses if ZDR.is_command(status)]
+
+    if not statuses or not commands or len(statuses)  < 2 or len(statuses) != len(commands):
         return 0
 
     corrections = 0
 
-    has_eventually_logged_in = ZDR.Status.LOGIN_SUCCESS.value in statuses
-
     for i in range(1, len(commands)):
         prev_status = statuses[i-1]
-        curr_status = statuses[i]
         prev_cmd = commands[i-1]
         curr_cmd = commands[i]
-
-        if has_eventually_logged_in:
-            if curr_status == ZDR.Status.LOGIN_FAILED.value:
-                corrections += 1
 
         if ZDR.is_only_command(prev_status) and prev_status == ZDR.Status.COMMAND_FAILED.value:
             similiarity = SequenceMatcher(None, prev_cmd, curr_cmd).ratio()
             if 0.7 <= similiarity < 1.0:
                 corrections += 1
-    return corrections
+    return corrections / len(commands)
 
 

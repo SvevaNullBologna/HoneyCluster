@@ -21,7 +21,6 @@ json iniziale:
             {
                 "session_start" : str,
                 "session_end" : str,
-                "raw_event_count": int,
                 "events": * solo eventi rilevanti
                 [
                             {
@@ -37,35 +36,37 @@ json iniziale:
         """
 
 
-def process_to_parquet(json_path: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
-    if not os.path.exists(json_path):
-        logging.warning(f"{json_path} does not exist")
+def process_to_parquet(json_file: Path, output_parquet: Path): # * vedi spiegazione sul formato parquet in documenti
+    if not os.path.exists(json_file):
+        logging.warning(f"{json_file} does not exist")
         return
 
     all_sessions_in_file = []
 
-    with open(json_path, 'rb') as f:
+    with open(json_file, 'rb') as f:
         for session_data in ijson.items(f, ''):
             start_time = session_data[ZDR.Cleaned_Attr.START_TIME.value]
             end_time = session_data[ZDR.Cleaned_Attr.END_TIME.value]
-            number_of_events = session_data[ZDR.Cleaned_Attr.COUNT.value]
             session_events = session_data[ZDR.Cleaned_Attr.EVENTS.value]
             if not session_events: continue
 
-            timestamps, commands, verbs, statuses = [],[],[],[]
+            statuses = [] # stati equivalenti al tipo di evento
+            timestamps = [] # tempi
+            commands = [] # tunneling e comandi ssh
+            verbs = [] # inizio dei comandi (utile per analisi, contiene anche quelli del tunneling)
 
             for event in session_events:
                 status = event[Cleaned_Attr.STATUS.value]
-                timestamp = event[Cleaned_Attr.TIME.value]
-
                 statuses.append(status)
-                timestamps.append(timestamp)
+                timestamp = event[Cleaned_Attr.TIME.value]
+                timestamps.append(ZDR.get_datetime(timestamp))
 
-                if ZDR.is_command(status):
-                    cmd = event.get(Cleaned_Attr.MSG.value)
-                    if cmd:
-                        commands.append(cmd)
-                        verbs.append(ZDR.get_verb_of_command(cmd))
+                command = event.get(Cleaned_Attr.MSG.value, "")
+                if command:
+                    commands.append(command)
+                    verb = ZDR.get_verb_of_command(command)
+                    if verb:
+                        verbs.append(verb)
 
             # qui posso già calcolare i valori voluti in HoneyClusterData:
             data_obj = HCD.HoneyClusterData(

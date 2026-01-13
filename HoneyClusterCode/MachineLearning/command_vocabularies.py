@@ -43,6 +43,8 @@ SIGNATURE_WEIGHTS = {
     'tunneling_tls': 4.5  # Gestito dai magic bytes
 }
 
+MAX_SIGNATURE_SCORE = 4.5
+
 TLS_MAGIC = ("\\x16\\x03\\x00", "\\x16\\x03\\x01", "\\x16\\x03\\x02", "\\x16\\x03\\x03")
 HTTP_VERBS = ("GET", "POST", "HEAD", "PUT", "CONNECT", "OPTIONS", "PATCH")
 
