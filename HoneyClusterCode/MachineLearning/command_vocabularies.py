@@ -45,8 +45,8 @@ SIGNATURE_WEIGHTS = {
 
 MAX_SIGNATURE_SCORE = 4.5
 
-TLS_MAGIC = ("\\x16\\x03\\x00", "\\x16\\x03\\x01", "\\x16\\x03\\x02", "\\x16\\x03\\x03")
-HTTP_VERBS = ("GET", "POST", "HEAD", "PUT", "CONNECT", "OPTIONS", "PATCH")
+TLS_MAGIC = ("\\x16\\x03\\x00", "\\x16\\x03\\x01", "\\x16\\x03\\x02", "\\x16\\x03\\x03") # attacchi a protocolli httpS
+HTTP_VERBS = ("GET", "POST", "HEAD", "PUT", "CONNECT", "OPTIONS", "PATCH") # attacchi a protocolli http
 
 TLS_MAGIC_CLEANED = ("TLS_PROBE", "UNKNOW_PROBE")
 HTTP_VERBS_CLEANED = ("HTTP_GET", "HTTP_POST", "HTTP_HEAD", "HTTP_PUT", "HTTP_CONNECT", "HTTP_OPTIONS", "HTTP_PATCH")

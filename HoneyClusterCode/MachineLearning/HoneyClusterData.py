@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Tuple
 
-from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED, MAX_SIGNATURE_SCORE, \
-    get_recon_exploit_flat
+from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED, MAX_SIGNATURE_SCORE
 from MachineLearning.command_vocabularies import _SIGNATURES, SIGNATURE_WEIGHTS
 
 
@@ -25,6 +24,8 @@ signatures
 ● Behavioral patterns: reconnaissance vs. exploitation ratio, error rate,
 command correction attempts
 """
+
+
 
 @dataclass
 class HoneyClusterData:
@@ -63,13 +64,15 @@ def get_inter_command_timing(command_times: list[datetime] = None) -> float: # c
         for i in range(len(sorted_times) - 1)
     ]
 
-    return sum(deltas) / len(deltas) # restituisce la media
+    avg_delta = sum(deltas) / len(deltas) # restituisce la media
+    return math.log1p(avg_delta)
 
 def get_session_duration(start_time: datetime = None, end_time: datetime = None) -> float:
     """ durata totale della sessione in secondi """
     if not start_time or not end_time:
         return 0.0
-    return (end_time - start_time).total_seconds()
+    seconds = (end_time - start_time).total_seconds()
+    return math.log1p(seconds)
 
 def get_time_of_day_patterns(start_time : datetime = None) -> Tuple[float,float]:
     """ otteniamo l'abitudine oraria dell'attaccante, ovvero in che ora della giornata attacca?
@@ -236,5 +239,4 @@ def get_command_correction_attempts(statuses: list[int], commands: list[str], lo
                 corrections += 1
 
     return corrections / total_relevant_events
-
 

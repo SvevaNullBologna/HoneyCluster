@@ -1,0 +1,15 @@
+# pulizia ed elaborazione dei dati
+
+gzip
+json
+ijson
+pandas
+
+# clustering
+
+sklearn
+
+
+# rappresentazione grafica 
+matplotib
+seaborn

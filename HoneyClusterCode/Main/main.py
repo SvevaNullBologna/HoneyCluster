@@ -1,30 +1,62 @@
-import logging
-from Zenodo.ZenodoCleaner import get_zenodo_log_list
-from MachineLearning.HoneyClusterML import clustering
-from MachineLearning.HoneyClusterML import cluster_analysis
-
 from pathlib import Path
 
-def main() -> None:
-    logging.basicConfig(level=logging.DEBUG)
 
-    logs = get_zenodo_log_list()
+_base_folder = Path()
+def _check_base_folder():
+    return _base_folder.exists() and _base_folder.is_dir()
 
-    clustering_result = clustering(logs)
+def _print_menu():
+    print("Choose the operation you want to perform by entering the preferred number")
+    print("1 = set base folder path")
+    print("2 = clean your zenodo gz files (do not decompress please)")
+    print("3 = process your cleaned files, that means, prepare them for clustering")
+    print("4 = cluster you processed files ")
+    print("5 = see the graphs resulting from the clustering process")
+    print("6 = abort operation")
+    print("Remember: you can stop and continue the cleaning and processing whenever you want\njust remember to erase the last created file")
+    print("\n\nenter your number:")
 
-    summary = cluster_analysis(clustering_result)
 
-    print(summary)
+def _choose_operation(value: int):
+    if value == 1:
+        set_base_folderpath()
+    elif value == 2:
+        cleaning(_base_folder)
+    elif value == 3:
+        processing(_base_folder)
+    elif value == 4:
+        clustering(_base_folder)
+    elif value == 5:
+        analysis(_base_folder)
+    elif value == 6:
+        print("aborted operation.")
+        return
 
-    # zenodo_interpreter.extract_and_clean_all_zenodo_logs_in_folder()
-    """ zenodo_log = ZenodoLog.read_file(Path(zenodo_interpreter.cleaned, "2019-12-08.json"))
-    for session in zenodo_log.sessions:
-        for event in session.events:
-            with open(Path("C:\\Users\\Sveva\\Desktop\\file.txt"),'a', encoding="utf-8") as f:
-                if event.is_command():
-                    f.write(event.message + "\n\n\n")
-    #ZenodoLog.write_on_file(Path("C:\\Users\\Sveva\\Desktop\\file.txt"), zenodo_log) """
+def set_base_folderpath(path: str | Path = None):
+    pass
+
+def cleaning(path: Path) -> None:
+    pass
+
+def processing(path: Path) -> None:
+    pass
+
+def clustering(path: Path) -> None:
+    pass
+
+def analysis(path: Path) -> None:
+    pass
+
+def main(str):
+    pass
+
 if __name__ == "__main__":
-    main()
-
-
+    got_valid_number = False
+    while not got_valid_number :
+        _print_menu()
+        try:
+            number = int(input())
+            if number in range(1,6):
+                got_valid_number = True
+        except ValueError:
+            continue
