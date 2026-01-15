@@ -144,3 +144,9 @@ def analysis_of_cluster(resulting_dataset: pd.DataFrame, scaled_dataset: pd.Data
     stats['count'] = resulting_dataset.groupby('cluster_id').size()
     return stats
 
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
+    paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
+    pd = read_dataset(paths.clustered_result)
+    show_all_features(pd)

@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
@@ -14,7 +15,7 @@ from joblib import dump,load
 def clustering(honey_paths: HoneyClusterPaths):
     try:
 
-        sample_data = _extraction_of_initial_clustering_subset(honey_paths.base_folder)
+        sample_data = _extraction_of_initial_clustering_subset(honey_paths.complete_dataset_file)
 
         # recupero lo stato precedente se esiste
         scaler = _get_scaler(honey_paths.scaler)
@@ -36,7 +37,7 @@ def clustering(honey_paths: HoneyClusterPaths):
             'cluster_id'] = labels  # aggiungiamo una colonna chiamata id del cluster e ci mettiamo le label
 
         _writing_as_parquet(clustered_sample_data, honey_paths.clustered_result)
-        _writing_as_parquet(scaled_sample_data, honey_paths.clustered_normalized)
+        # _writing_as_parquet(scaled_sample_data, honey_paths.clustered_normalized)
 
     except Exception as e:
         logging.debug(f"errore nel clustering: {e}")
@@ -47,9 +48,9 @@ def clustering(honey_paths: HoneyClusterPaths):
 //////////////////////////////////////////PIPELINE CLUSTERING////////////////////////////////
 """
 
-def _extraction_of_initial_clustering_subset(base_folder_path: Path, n_samples: int = 200000) -> pd.DataFrame: # RAISES EXCEPTION!
+def _extraction_of_initial_clustering_subset(complete_dataset: Path, n_samples: int = 200000) -> pd.DataFrame: # RAISES EXCEPTION!
     logging.info("Caricamento dataset principale")
-    df = read_main_dataset(base_folder_path)
+    df = read_main_dataset(complete_dataset)
 
     if df.empty:
         logging.warning("dataset vuoto")
@@ -131,6 +132,8 @@ def _creating_clusters(scaled_core, model_path: Path, old_model: KMeans = None):
     return labels
 
 def _writing_as_parquet(clustered_data: pd.DataFrame, output_path: Path):
+    if isinstance(clustered_data, np.ndarray):
+        clustered_data = pd.DataFrame(clustered_data)
     clustered_data.to_parquet(output_path)
 
 
