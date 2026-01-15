@@ -1,9 +1,15 @@
+import logging
+
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 import pandas as pd
 from sklearn.decomposition import PCA
 
+
+TEMPORAL_FEATURES = ['inter_command_timing', 'session_duration', 'time_of_day_patterns_sin', 'time_of_day_patterns_cos']
+COMMAND_FEATURES = ['unique_commands_ratio', 'command_diversity_ratio', 'tool_signatures']
+BEHAVIORAL_FEATURES = ['reconnaissance_vs_exploitation_ratio', 'error_rate', 'command_correction_attempts']
 
 #quello che serve a noi:
 def plot_feature(df: pd.DataFrame, feature_name: str):
@@ -86,3 +92,29 @@ def plot_pca_selected_features(df: pd.DataFrame, selected_features: list, labels
     )
     print("\nImportanza delle Feature (Loadings) nei primi due componenti:")
     print(loadings)
+
+def analysis_of_cluster(resulting_dataset: pd.DataFrame, scaled_dataset: pd.DataFrame):
+    logging.info("Generazione grafici di analisi")
+
+    show_all_features(resulting_dataset)
+
+    # Se scaled_dataset è un numpy array, lo trasformiamo qui al volo
+    if not isinstance(scaled_dataset, pd.DataFrame):
+        # Prendiamo i nomi delle colonne dal dataset originale (escludendo l'id del cluster)
+        feature_names = resulting_dataset.drop(columns=['cluster_id'], errors='ignore').columns
+        scaled_dataset = pd.DataFrame(scaled_dataset, columns=feature_names)
+
+
+    plot_pca_selected_features(scaled_dataset, TEMPORAL_FEATURES, resulting_dataset['cluster_id'])
+    plot_pca_selected_features(scaled_dataset, COMMAND_FEATURES, resulting_dataset['cluster_id'])
+    plot_pca_selected_features(scaled_dataset, BEHAVIORAL_FEATURES, resulting_dataset['cluster_id'])
+    plot_pca_selected_features(scaled_dataset, ['inter_command_timing', 'session_duration'],
+                               resulting_dataset['cluster_id'])  # varianza 87%
+    plot_pca_selected_features(scaled_dataset, ['command_diversity_ratio', 'tool_signatures'],
+                               resulting_dataset['cluster_id'])
+    plot_pca_selected_features(scaled_dataset, ['unique_commands_ratio', 'tool_signatures'],
+                               resulting_dataset['cluster_id'])  # 55%
+
+    stats = resulting_dataset.groupby('cluster_id').mean()
+    stats['count'] = resulting_dataset.groupby('cluster_id').size()
+    return stats

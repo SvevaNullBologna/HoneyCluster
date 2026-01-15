@@ -39,8 +39,10 @@ SIGNATURE_WEIGHTS = {
     'priv_esc': 3.8,
     'defense_evasion': 4.0,
     'login_occurrence': 1.0,  # Gestito dagli status
+    'tunneling_request': 3.0 ,
     'tunneling_http': 3.5,  # Gestito dai magic bytes
-    'tunneling_tls': 4.5  # Gestito dai magic bytes
+    'tunneling_tls': 4.5,  # Gestito dai magic bytes
+    'versioning': 2.6
 }
 
 MAX_SIGNATURE_SCORE = 4.5

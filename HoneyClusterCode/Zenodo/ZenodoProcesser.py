@@ -7,15 +7,34 @@ import pandas as pd
 
 import Zenodo.ZenodoDataReader as ZDR
 import MachineLearning.HoneyClusterData as HCD
+from Main.HoneyCluster import HoneyClusterPaths
 from Zenodo.ZenodoDataReader import Cleaned_Attr
 
 from MachineLearning.command_vocabularies import get_all_known_verbs, get_recon_exploit_flat
 
+
+
+
 """
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                PROCESSING DATASET INTO USEFUL DATAS
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////OTTENIMENTO DATASET COMPLETO PER ML/////////////////////////////////////////////////////////////////////////////
 """
+
+def get_main_dataset_from_processed(cleaned: Path, processed: Path, complete_dataset_output: Path) -> pd.DataFrame:
+
+        logging.basicConfig(level=logging.DEBUG)
+        process_cleaned_dataset(cleaned, processed)
+        complete = _concat_parquets(processed, complete_dataset_output)
+        return complete
+
+def read_main_dataset(complete_dataset_output: Path) -> pd.DataFrame:
+    try:
+        m_ds = _read_parquet(complete_dataset_output)
+        return m_ds
+    except FileNotFoundError:
+        logging.error("please, get main dataset before trying to read it")
+        return pd.DataFrame()
+
+
 """
 json iniziale:
 
@@ -35,10 +54,42 @@ json iniziale:
             }
             ...
         ]
-        """
+"""
 
 
-def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: set[str] = None, all_recon: set[str] = None, all_exploit: set[str] = None): # * vedi spiegazione sul formato parquet in documenti
+"""
+////////////////////////////////////////////////////////////PROCESSING = CALCOLO VETTORI PER ML//////////////////////////////////////////////////////////////////////////////////////
+"""
+def process_dataset(paths: HoneyClusterPaths):
+    process_cleaned_dataset(paths.cleaned_folder, paths.processed_folder)
+    _concat_parquets(paths.processed_folder, paths.complete_dataset_file)
+
+
+def process_cleaned_dataset(starting_path: Path, resulting_path : Path): # processa l' intero dataset cleaned
+    if not starting_path.exists():
+        print(f"Errore: La cartella {starting_path} non esiste.")
+        return
+
+    resulting_path.mkdir(parents=True, exist_ok=True)
+
+    all_known_verbs = get_all_known_verbs()  # lo calcoliamo qui per efficienza (rifarlo per tutti i dati sarebbe un incubo
+    all_recon, all_exploit = get_recon_exploit_flat()
+
+    for json_file in starting_path.glob("*.json"):
+        parquet_output = resulting_path / json_file.with_suffix('.parquet').name
+        if os.path.exists(parquet_output):
+            logging.info(f"skipping {parquet_output}.")
+            continue
+
+        logging.info(f"Processing {json_file} ...")
+        try:
+            process_to_parquet(json_file, parquet_output, all_known_verbs, all_recon, all_exploit)
+            logging.info(f"Completed {json_file}")
+        except Exception as e:
+            logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
+
+
+def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: set[str] = None, all_recon: set[str] = None, all_exploit: set[str] = None): # processa un singolo cleaned file
     if not os.path.exists(json_file):
         logging.warning(f"{json_file} does not exist")
         return
@@ -107,42 +158,12 @@ def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: s
         df.to_parquet(output_parquet, engine='fastparquet', index=False)
         logging.info(f"Saved {len(df)} sessions to {output_parquet}")
 
+
 """
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-                                        EXECUTION
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////PRIVATE USEFUL FUNCTIONS///////////////////////////////////////////////////////////////////////////////
 """
 
-
-def process_cleaned_dataset(base_folder_path: Path):
-    if not (base_folder_path and base_folder_path.exists()):
-        logging.error(f"base_folder_path {base_folder_path} non existent")
-        return
-    starting_path = Path(base_folder_path, "cleaned")
-    resulting_path = base_folder_path / "processed"
-    if not starting_path.exists():
-        print(f"Errore: La cartella {starting_path} non esiste.")
-        return
-
-    resulting_path.mkdir(parents=True, exist_ok=True)
-
-    all_known_verbs = get_all_known_verbs()  # lo calcoliamo qui per efficienza (rifarlo per tutti i dati sarebbe un incubo
-    all_recon, all_exploit = get_recon_exploit_flat()
-
-    for json_file in starting_path.glob("*.json"):
-        parquet_output = resulting_path / json_file.with_suffix('.parquet').name
-        if os.path.exists(parquet_output):
-            logging.info(f"skipping {parquet_output}.")
-            continue
-
-        logging.info(f"Processing {json_file} ...")
-        try:
-            process_to_parquet(json_file, parquet_output, all_known_verbs, all_recon, all_exploit)
-            logging.info(f"Completed {json_file}")
-        except Exception as e:
-            logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
-
-def read_parquet(output_path: Path) -> pd.DataFrame:
+def _read_parquet(output_path: Path) -> pd.DataFrame:
     try:
         datas = pd.read_parquet(output_path, engine='fastparquet')
         return datas
@@ -150,8 +171,7 @@ def read_parquet(output_path: Path) -> pd.DataFrame:
         logging.warning(f"Errore di lettura {output_path.name}: {e}")
         return pd.DataFrame()
 
-def concat_parquets(base_folder_path : Path) -> pd.DataFrame:
-    parquets_folder_path = base_folder_path / "processed"
+def _concat_parquets(parquets_folder_path : Path, complete_dataset_output: Path) -> pd.DataFrame:
     if not os.path.exists(parquets_folder_path):
         logging.error(f"La cartella {parquets_folder_path} non existent")
         return pd.DataFrame()
@@ -172,32 +192,13 @@ def concat_parquets(base_folder_path : Path) -> pd.DataFrame:
 
     logging.info(f"Number of loaded files: {len(df)}")
 
-    df.to_parquet(parquets_folder_path.parent / "complete_dataset.parquet", index=False)
+    df.to_parquet(complete_dataset_output, index=False)
 
     return df
-
-
-def get_main_dataset_from_processed(base_folder_path: Path) -> pd.DataFrame:
-
-        logging.basicConfig(level=logging.DEBUG)
-        process_cleaned_dataset(base_folder_path)
-        complete = concat_parquets(base_folder_path)
-        return complete
-
-def read_main_dataset(base_folder_path: Path) -> pd.DataFrame:
-    try:
-        m_ds = read_parquet(Path(base_folder_path, "complete_dataset.parquet"))
-        return m_ds
-    except FileNotFoundError:
-        logging.error("please, get main dataset before trying to read it")
-        return pd.DataFrame()
 
 
 
 if __name__ == "__main__":
     base_folder = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
-    #json_path = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\cleaned\\2019-05-14.json")
-    #process_to_parquet(json_path, base_folder / "processed")
-    process_cleaned_dataset(base_folder_path = base_folder)
-    dataset = get_main_dataset_from_processed(base_folder)
+    process_dataset(HoneyClusterPaths(base_folder))
     print(read_main_dataset(base_folder))

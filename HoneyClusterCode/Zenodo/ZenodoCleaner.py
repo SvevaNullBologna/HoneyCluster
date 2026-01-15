@@ -1,33 +1,22 @@
 import logging
-import os
 from pathlib import Path
 import gzip
 import json
 import ijson
 
-from datetime import datetime
-
 import ZenodoDataReader as ZK
+from Main.HoneyCluster import HoneyClusterPaths
 
 
-def set_working_folder(zenodo_local_path: Path):
-    if not _check_directory(zenodo_local_path / "original", False):
-        logging.error("no downloaded dataset directory found. Check path and try again")
-        raise NotADirectoryError("no downloaded dataset directory found. Check path and try again")
-    raw_path = zenodo_local_path / "original"
-    _check_directory(zenodo_local_path / "cleaned", True)
-    clean_path = zenodo_local_path / "cleaned"
-    return raw_path, clean_path
+def clean_zenodo_dataset(paths :HoneyClusterPaths):
+    extract_and_clean_all_zenodo_logs_in_folder(paths.original_folder, paths.cleaned_folder)
 
-
-def extract_and_clean_all_zenodo_logs_in_folder(originals_path: Path, cleaned_path: Path):
+def extract_and_clean_all_zenodo_logs_in_folder(originals_path: Path, cleaned_path: Path): # cleans all gz zenodo files in a directory
     for filename in originals_path.glob("*.json.gz"):
         clean_zenodo_gz(filename, cleaned_path)
 
-
-
-def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
-    log_date = parse_date_from_gz_filename(gz_path.name)
+def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool: # cleans single file
+    log_date = _parse_date_from_gz_filename(gz_path.name)
     out_file = (cleaned_path / log_date).with_suffix(".json")
 
     if out_file.exists():
@@ -81,53 +70,11 @@ def clean_zenodo_gz(gz_path: Path, cleaned_path: Path) -> bool:
         return False
 
 
-def get_zenodo_log_list(cleaned_path: Path):
-    logging.info("getting Zenodo log list")
-
-    logs = []
-
-    for file in cleaned_path.glob("*json"):
-        try:
-            with open(file, "r", encoding="utf-8") as f:
-                # "sessions" è un oggetto, vogliamo leggere session_id -> eventi
-                sessions = {}
-                parser = ijson.kvitems(f, "sessions")  # legge le coppie chiave-valore
-                for session_id, events in parser:
-                    sessions[session_id] = events  # events è già lista di dizionari
-                logs.append({
-                    "date": parse_date_from_json_filename(file.name),
-                    "sessions": sessions
-                })
-        except Exception as e:
-            logging.error(f"Error reading cleaned log {file.name}: {e}")
-
-    return logs
-
-def clean_zenodo_dataset(zenodo_folder: Path):
-    originals, cleaned = set_working_folder(zenodo_folder)
-
-    extract_and_clean_all_zenodo_logs_in_folder(originals, cleaned)
-
 
 """
     PRIVATE FUNCTION FOR USAGE PURPOSE
 
 """
-
-def _check_directory(path: Path | None, creation: bool) -> bool:
-    if not path:
-        logging.error("Path cannot be empty")
-        return False
-    if not os.path.isdir(path):
-        logging.error(f"Directory non valida: {path}")
-        if creation:
-            os.makedirs(path, exist_ok=True)
-            logging.info(f"Directory creata: {path}")
-            return True
-        return False
-    else:
-        logging.info(f"Directory valida: {path}")
-        return True
 
 
 def _clean_event(e:dict) -> dict | None: # elimina i None, converte i Decimal in Float ed elimina session id che è già usato come chiave
@@ -161,31 +108,44 @@ def _convert_decimals(obj):
     else:
         return obj
 
-def parse_date_from_gz_filename(filename:str) -> str:
+def _parse_date_from_gz_filename(filename:str) -> str:
     return filename.removesuffix(".json.gz").removeprefix("cyberlab_")
 
 """
-////////////////////////////////////////////////////////////////////////////////////////////
-                                    UTILITIES 
-////////////////////////////////////////////////////////////////////////////////////////////
+GET COMMANDS
 """
+def DEBUG_from_all_files_print_commands(jsonpath : Path, out_commands: Path) -> None:
+    for gz_path in jsonpath.glob("*.json.gz"):
+        with gzip.open(gz_path, "rb") as f:
 
-
-def parse_date_from_json_filename(filename: str) -> str: # es: cyberlab_2019-05-13.json -> 2019-05-13
-    filename = filename.removesuffix(".json")
-    return filename.removeprefix("cyberlab_")
-
-def get_date_from_string(date: str, pattern: str ="%Y-%m-%d") -> datetime:
-    """ yyyy-mm-dd """
-    return datetime.strptime(date, pattern)
-
-def drop_nulls(d: dict)-> dict:
-    return {k: v for k, v in d.items() if v is not None}
+            # Iteriamo sugli oggetti principali del JSON
+            for session in ijson.items(f, "item"):
+                commands = []
+                for _, events in session.items():  # ignoriamo session_id
+                    if not events:
+                        continue
+                    for event in events:
+                        eventid = event.get(ZK.Useful_Cowrie_Attr.EVENTID.value)
+                        status = ZK.get_status(eventid)
+                        if ZK.is_only_command(status):
+                            logging.info(f"Command {status}")
+                            msg = event.get(ZK.Useful_Cowrie_Attr.MSG.value)
+                            if msg:
+                                commands.append(msg)
+                        if status == ZK.Event.TCPIP_DATA:
+                            data = event.get(ZK.Useful_Cowrie_Attr.DATA.value)
+                            logging.debug(data)
+                            if msg:
+                                commands.append(data)
+                if commands:
+                    logging.debug(f"commands: {commands}")
+                    with open(out_commands, "a", encoding="utf-8") as out:
+                        out.writelines('\n\n'.join(commands))
 
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    clean_zenodo_dataset(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-
+    clean_zenodo_dataset(HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")))
+    #DEBUG_from_all_files_print_commands(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\original"))
 

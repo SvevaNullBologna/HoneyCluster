@@ -11,7 +11,7 @@ from Zenodo import ZenodoDataReader as ZDR
 from datetime import datetime
 import math
 
-from Zenodo.ZenodoDataReader import is_only_command, is_login
+from Zenodo.ZenodoDataReader import is_only_command, is_login, is_fingerprint, is_version
 
 """
 DALLA CONSEGNA:
@@ -115,11 +115,25 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
 
     found_signatures = set()
 
-    if verbs:
+    for status in statuses :
+        if is_fingerprint(status):
+            found_signatures.add("fingerprinting")
+
+        if is_version(status):
+            found_signatures.add("versioning")
+
+        if ZDR.Status.TCPIP_REQUEST.value in statuses:
+            found_signatures.add("tunneling_request")
+
+        login_occurrence = ZDR.count_logins(statuses)
+        if len(statuses) > 0 and (login_occurrence / len(statuses) >= 0.6):
+            found_signatures.add("login_occurrence")
+
+    if verbs: #ci sono
         verbs_set = set(verbs)
 
         for sig_name, sig_commands in _SIGNATURES.items():
-            if any(cmd in verbs_set for cmd in sig_commands):
+            if verbs_set.intersection(sig_commands):
                 found_signatures.add(sig_name)
 
         # TUNNELING (Pattern matching su stringhe magiche)
@@ -128,14 +142,6 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
 
         if any(v in HTTP_VERBS_CLEANED for v in verbs):
             found_signatures.add("tunneling_http")
-
-    if statuses:
-        if ZDR.Status.FINGERPRINT.value in statuses:
-            found_signatures.add("fingerprinting")
-
-        login_occurrence = ZDR.count_logins(statuses)
-        if len(statuses) > 0 and (login_occurrence / len(statuses) >= 0.6):
-            found_signatures.add("login_occurrence")
 
     if not found_signatures:
         return 0.0

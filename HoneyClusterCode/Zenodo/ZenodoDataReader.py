@@ -83,6 +83,9 @@ def is_fingerprint(status:int) -> bool:
 //////////////////////////////////////////////////GESTIONE TUNNELING/////////////////////////////////////////////////
 """
 
+def is_tunneling(status:int)->bool:
+    return status in [Status.TCPIP_DATA.value, Status.TCPIP_REQUEST.value]
+
 def is_tunneling_data(status:int) -> bool:
     return status == Status.TCPIP_DATA.value
 

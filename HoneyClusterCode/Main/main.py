@@ -1,9 +1,9 @@
+import os
+from Zenodo.ZenodoCleaner import extract_and_clean_all_zenodo_logs_in_folder
+from Zenodo.ZenodoProcesser import process_cleaned_dataset
+from HoneyCluster import HoneyClusterPaths
 from pathlib import Path
 
-
-_base_folder = Path()
-def _check_base_folder():
-    return _base_folder.exists() and _base_folder.is_dir()
 
 def _print_menu():
     print("Choose the operation you want to perform by entering the preferred number")
@@ -13,50 +13,69 @@ def _print_menu():
     print("4 = cluster you processed files ")
     print("5 = see the graphs resulting from the clustering process")
     print("6 = abort operation")
-    print("Remember: you can stop and continue the cleaning and processing whenever you want\njust remember to erase the last created file")
+    print("Remember: you can stop and continue the cleaning and processing whenever you want\njust remember to erase (JUST) the last modified file")
     print("\n\nenter your number:")
 
+def _ask_number()-> int :
+    while True:
+        _print_menu()
+        number = input()
+        try:
+            number = int(number)
+        except ValueError:
+            continue
+        if number in range(1, 6):
+                return number
 
-def _choose_operation(value: int):
-    if value == 1:
-        set_base_folderpath()
-    elif value == 2:
-        cleaning(_base_folder)
-    elif value == 3:
-        processing(_base_folder)
-    elif value == 4:
-        clustering(_base_folder)
-    elif value == 5:
-        analysis(_base_folder)
-    elif value == 6:
-        print("aborted operation.")
-        return
+def _ask_path() -> Path :
+    while True:
+        print("Please, enter the complete dataset folder path. It has to contain a folder called originals, where you put your zenodo gz files. Do not decompress!")
+        print("example: zenodo_dataset -> originals -> [all gz files]")
+        input_path = Path(input())
+        if not input_path :
+            print("empty path. Please re-try")
+        elif not os.path.isdir(path):
+            print("the path is not a directory. Please re-try")
+        originals_path = Path(input_path, "originals")
+        if not os.path.isdir(originals_path) :
+            print("no original folder. Please re-try")
+        is_empty = not any(originals_path.rglob('*.json.gzip'))
+        if is_empty:
+            print(f"no zenodo json.gzip files in {originals_path}. Please add them and re-try")
+        return path
 
-def set_base_folderpath(path: str | Path = None):
+def set_base_folderpath(input_path: Path):
+    HoneyClusterPaths(input_path)
+
+def cleaning(paths : HoneyClusterPaths) -> None:
+    extract_and_clean_all_zenodo_logs_in_folder(originals_path=paths.base_folder, cleaned_path=paths.cleaned_folder)
+
+def processing(paths : HoneyClusterPaths) -> None:
+    process_cleaned_dataset(base_folder_path= paths.cleaned_folder)
+
+def clustering() -> None:
     pass
 
-def cleaning(path: Path) -> None:
-    pass
-
-def processing(path: Path) -> None:
-    pass
-
-def clustering(path: Path) -> None:
-    pass
-
-def analysis(path: Path) -> None:
+def analysis() -> None:
     pass
 
 def main(str):
     pass
 
 if __name__ == "__main__":
-    got_valid_number = False
-    while not got_valid_number :
-        _print_menu()
-        try:
-            number = int(input())
-            if number in range(1,6):
-                got_valid_number = True
-        except ValueError:
-            continue
+    while True:
+        number = _ask_number()
+        if number == 1:
+            path = _ask_path()
+            set_base_folderpath(path)
+        elif number == 2:
+            cleaning()
+        elif number == 3:
+            processing()
+        elif number == 4:
+            clustering()
+        elif number == 5:
+            analysis()
+        elif number == 6:
+            print("aborted operation.")
+            break

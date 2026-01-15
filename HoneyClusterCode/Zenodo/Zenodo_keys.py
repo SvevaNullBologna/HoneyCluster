@@ -12,7 +12,9 @@ class Status(Enum):
     COMMAND_FAILED = -2
     COMMAND_SUCCESS = -3
     # tunneling
-    TCPIP_DATA = -4 # contains command, that's why it's negative
+    TCPIP_REQUEST = 5  # it's a direct TCP connection attempt
+    TCPIP_DATA = -4 # contains command, that's why it's negative. It's also a tool signature
+
     # no important info
     IGNORED = 0
 
@@ -25,6 +27,7 @@ class Event(Enum):
     VERSION = "cowrie.client.version"
     FINGERPRINT = "cowrie.client.fingerprint"
     # tunneling
+    TCPIP_REQUEST = "cowrie.direct-tcpip.request"
     TCPIP_DATA = "cowrie.direct-tcpip.data"
     # commands
     INPUT = "cowrie.command.input"

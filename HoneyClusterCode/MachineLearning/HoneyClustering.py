@@ -5,21 +5,11 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
-from MachineLearning.DataDistributionObserver import show_all_features, plot_pca_selected_features
-from MachineLearning.HoneyClusterData import HoneyClusterData
+from Main.HoneyCluster import HoneyClusterPaths
 from Zenodo.ZenodoProcesser import read_main_dataset
 
 from joblib import dump,load
 
-_ARTIFACTS = "C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\artifacts"
-_SCALER_PATH = Path(_ARTIFACTS,"scaler_honeypot.joblib")
-_MODEL_PATH = Path(_ARTIFACTS,"kmeans_model.joblib")
-_CORE_DATASET_PATH = Path(_ARTIFACTS,"core_dataset.parquet")
-
-def create_folders():
-    # crea la cartella atifacts se non esiste (ci depositeremo lo scaler e il model)
-    _ARTIFACTS_PATH = Path(_ARTIFACTS)
-    _ARTIFACTS_PATH.mkdir(parents=True, exist_ok=True)
 
 def _extraction_of_initial_clustering_subset(base_folder_path: Path, n_samples: int = 200000) -> pd.DataFrame: # RAISES EXCEPTION!
     logging.info("Caricamento dataset principale")
@@ -52,27 +42,27 @@ def _extraction_of_initial_clustering_subset(base_folder_path: Path, n_samples: 
     #mischiamo per non avere i dati ordinati per classe
     return df_final.sample(frac=1, random_state=42).reset_index(drop=True)
 
-def _get_scaler():
+def _get_scaler(scaler_path: Path):
     try:
-        scaler = load(_SCALER_PATH)
+        scaler = load(scaler_path)
         return scaler
     except FileNotFoundError:
         return None
 
-def _get_model():
+def _get_model(model_path: Path):
     try:
-        model = load(_MODEL_PATH)
+        model = load(model_path)
         return model
     except FileNotFoundError:
         return None
 
-def _save_scaler(scaler: StandardScaler):
-    dump(scaler, _SCALER_PATH)
+def _save_scaler(scaler: StandardScaler, scaler_path: Path):
+    dump(scaler, scaler_path)
 
-def _save_model(model: KMeans):
-    dump(model, _MODEL_PATH)
+def _save_model(model: KMeans, model_path: Path):
+    dump(model, model_path)
 
-def _build_scaled_core_model(dataset: pd.DataFrame, old_scaler : StandardScaler = None): # scaliamo i dati per evitare che dei valori troppo grandi sovrastino gli altri
+def _build_scaled_core_model(dataset: pd.DataFrame, scaler_path: Path, old_scaler : StandardScaler = None): # scaliamo i dati per evitare che dei valori troppo grandi sovrastino gli altri
 
     if not old_scaler: # lo scaler impara, quindi riutilizzarlo è MEGLIO.
         scaler = StandardScaler() # impara media e deviazione standard per ciascuna riga del dataset
@@ -81,11 +71,11 @@ def _build_scaled_core_model(dataset: pd.DataFrame, old_scaler : StandardScaler 
         scaler = old_scaler
         scaled = scaler.transform(dataset)
 
-    _save_scaler(scaler) # salviamo lo scaler in un file
+    _save_scaler(scaler, scaler_path) # salviamo lo scaler in un file
 
     return scaled, scaler # restituiamo i dati scalati
 
-def _clustering(scaled_core, old_model: KMeans = None):
+def _creating_clusters(scaled_core, model_path: Path, old_model: KMeans = None):
     if not old_model:
         model = KMeans( #  impara la posizione dei centroidi
             n_clusters=3,
@@ -100,26 +90,25 @@ def _clustering(scaled_core, old_model: KMeans = None):
         model = old_model
         labels = model.predict(scaled_core) # restituisce l'oggetto modello stesso, non le labels come in sklearn
 
-    _save_model(model)
+    _save_model(model, model_path)
 
     return labels
 
-def complete_clustering_pipeline(base_folder_path: Path):
+def clustering(honey_paths: HoneyClusterPaths):
     try:
-        create_folders()
 
-        sample_data = _extraction_of_initial_clustering_subset(base_folder_path)
+        sample_data = _extraction_of_initial_clustering_subset(honey_paths.base_folder)
 
         # recupero lo stato precedente se esiste
-        scaler = _get_scaler()
-        model = _get_model()
+        scaler = _get_scaler(honey_paths.scaler)
+        model = _get_model(honey_paths.model)
 
         # preparo i dati (e salvo lo scaler aggiornato)
-        scaled_sample_data, scaler = _build_scaled_core_model(sample_data, scaler) # aggiorna automaticamente lo scaler
+        scaled_sample_data, scaler = _build_scaled_core_model(sample_data, honey_paths.scaler, scaler) # aggiorna automaticamente lo scaler
 
         # il dataset core che stiamo usando (è un subset, quindi è importante metterlo da parte?)
 
-        labels = _clustering(scaled_sample_data, model) #aggiorna automaticamente il model
+        labels = _creating_clusters(scaled_sample_data,honey_paths.model,model) #aggiorna automaticamente il model
         #otteniamo una lista del tipo [1,1, 0, 2, 1].
         #ogni sessione viene assegnata al centroide più vicino
         #invece che analizzare milioni di file, possiamo analizzare i 'rappresentanti' dei gruppi
@@ -135,38 +124,10 @@ def complete_clustering_pipeline(base_folder_path: Path):
 
 
 
-def analysis_of_cluster(resulting_dataset: pd.DataFrame, scaled_dataset: pd.DataFrame):
-    logging.info("Generazione grafici di analisi")
-
-    #show_all_features(resulting_dataset)
-
-    # Se scaled_dataset è un numpy array, lo trasformiamo qui al volo
-    if not isinstance(scaled_dataset, pd.DataFrame):
-        # Prendiamo i nomi delle colonne dal dataset originale (escludendo l'id del cluster)
-        feature_names = resulting_dataset.drop(columns=['cluster_id'], errors='ignore').columns
-        scaled_dataset = pd.DataFrame(scaled_dataset, columns=feature_names)
-
-    TEMPORAL_FEATURES = ['inter_command_timing', 'session_duration', 'time_of_day_patterns_sin',
-                         'time_of_day_patterns_cos']
-    COMMAND_FEATURES = ['unique_commands_ratio', 'command_diversity_ratio', 'tool_signatures']
-    BEHAVIORAL_FEATURES = ['reconnaissance_vs_exploitation_ratio', 'error_rate', 'command_correction_attempts']
-
-    #plot_pca_selected_features(scaled_dataset, TEMPORAL_FEATURES, resulting_dataset['cluster_id'])
-    #plot_pca_selected_features(scaled_dataset, COMMAND_FEATURES, resulting_dataset['cluster_id'])
-    #plot_pca_selected_features(scaled_dataset, BEHAVIORAL_FEATURES, resulting_dataset['cluster_id'])
-    #plot_pca_selected_features(scaled_dataset, ['inter_command_timing', 'session_duration'], resulting_dataset['cluster_id']) # varianza 87%
-    #plot_pca_selected_features(scaled_dataset, ['command_diversity_ratio','tool_signatures'], resulting_dataset['cluster_id'])
-    # plot_pca_selected_features(scaled_dataset, ['unique_commands_ratio','tool_signatures'], resulting_dataset['cluster_id']) # 55%
-
-
-    stats = resulting_dataset.groupby('cluster_id').mean()
-    stats['count'] = resulting_dataset.groupby('cluster_id').size()
-    return stats
 
 
 if __name__ == "__main__":
     #logging.basicConfig(level=logging.DEBUG)
-    base_folder = Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")
-    clustered_dataset, scaled_dataset = complete_clustering_pipeline(base_folder)
-    result = analysis_of_cluster(clustered_dataset, scaled_dataset)
+    paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
+    clustered_dataset, scaled_dataset = clustering(paths)
 
