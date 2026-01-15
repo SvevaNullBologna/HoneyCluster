@@ -145,6 +145,6 @@ def DEBUG_from_all_files_print_commands(jsonpath : Path, out_commands: Path) -> 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    #clean_zenodo_dataset(HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")))
-    DEBUG_from_all_files_print_commands(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\original"), Path("C:\\Users\\Sveva\\Desktop\\comandi.txt"))
+    clean_zenodo_dataset(HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")))
+    #DEBUG_from_all_files_print_commands(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\original"), Path("C:\\Users\\Sveva\\Desktop\\comandi.txt"))
 

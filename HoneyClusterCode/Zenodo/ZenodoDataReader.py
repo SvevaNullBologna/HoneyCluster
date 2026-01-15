@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import Tuple
 
-from MachineLearning.command_vocabularies import FAST_CHECK_LONGER_VERBS, TLS_MAGIC, HTTP_VERBS
+from MachineLearning.command_vocabularies import get_fast_check_set, TLS_VERSIONS_MAP, HTTP_VERBS_MAP, TLS_NOT_KNOWN
 from Zenodo.Zenodo_keys import Status, Event, Useful_Cowrie_Attr, Cleaned_Attr
 """
 /////////////////////////////////////////////////ALWAYS_USEFUL///////////////////////////////////////////////////////
@@ -92,7 +92,7 @@ def is_tunneling_data(status:int) -> bool:
 def count_tunneling(statuses: list[int]) -> int:
     if not statuses:
         return 0
-    return sum(is_tunneling_data(status) for status in statuses)
+    return sum(is_tunneling(status) for status in statuses)
 
 def get_tcpip_data(event_dict: dict):
     raw = event_dict.get(Useful_Cowrie_Attr.DATA.value)
@@ -110,22 +110,30 @@ def get_tcpip_data(event_dict: dict):
 
     return data_extracted
 
+
 def clean_tcip_message(message: str) -> str:
     if not message:
         return ""
-    msg = message.strip()
 
-    if msg.startswith("b'") and msg.endswith("'"):
+    # Pulizia dai wrapper python b'...'
+    msg = message.strip()
+    if (msg.startswith("b'") or msg.startswith('b"')) and msg.endswith(msg[1]):
         msg = msg[2:-1]
 
-    if msg.startswith(TLS_MAGIC):
-        return "TLS_PROBE"
+    # 1. Controllo TLS (Handshake)
+    for magic, label in TLS_VERSIONS_MAP.items():
+        if magic in msg:
+            return label
 
-    for verb in HTTP_VERBS: # sappiamo che è HTTP
-        if msg.startswith(verb + " "):
-            return f"HTTP_{verb}"
+    # 2. Controllo HTTP
+    # Spesso nei tunnel HTTP c'è un percorso dopo il verbo (es: GET /index.html)
+    parts = msg.split()
+    if parts:
+        verb_candidate = parts[0].upper()
+        if verb_candidate in HTTP_VERBS_MAP:
+            return HTTP_VERBS_MAP[verb_candidate]
 
-    return "UNKNOWN_PROBE"
+    return TLS_NOT_KNOWN
 
 """
 //////////////////////////////////////////////////GESTIONE COMANDI///////////////////////////////////////////////////
@@ -136,28 +144,39 @@ def is_command(status: int) -> bool:
 def is_only_command(status: int) -> bool:
     return status < 0 and status != Status.TCPIP_DATA.value
 
-def isolate_command(message: str) -> str:
+def clean_command(message: str) -> list[str]:
+    cmd_isolated = _isolate_command(message)
+    return _get_multiple_commands(cmd_isolated)
+
+def _isolate_command(message: str) -> str:
     s = message.strip()
     s = re.sub(r'^(Command found:|CMD:|Command not found:)\s*', '', s, flags=re.IGNORECASE)
     return s
+
+def _get_multiple_commands(message: str) -> list[str]:
+     return re.split(r';|&&|\|\||\|', message)
 
 def get_command_data(event_dict: dict)-> dict | None:
     msg = event_dict.get(Useful_Cowrie_Attr.MSG.value)
     if not msg:
         return {}
+    cmd_clean = clean_command(msg)
+
     return {
-        Cleaned_Attr.MSG.value : isolate_command(msg)
+        Cleaned_Attr.MSG.value : cmd_clean
     }
 
 
-def get_verb_of_command(cmd: str = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
+def get_verb_of_command(cmd: str = None, fast_check_set: set[str] = None) -> str: # prendiamo il verbo del comando ovvero : uname -a -> uname
     # strip elimina gli spazi all'inizio e alla fine
     # split divide in sottostringhe secondo un delimitatore. Senza nulla dentro, divide per spazi
     if not cmd:
         return ""
     cmd_clean = cmd.strip()
     # 1. Controlliamo prima i "pezzi grossi"
-    for long_verb in FAST_CHECK_LONGER_VERBS:
+    if not fast_check_set:
+        fast_check_set = get_fast_check_set()
+    for long_verb in fast_check_set:
         if cmd_clean.startswith(long_verb):
             return long_verb
 

@@ -14,3 +14,7 @@ class HoneyClusterPaths:
         self.scaler = Path(self.artifacts_folder,"scaler_honeypot.joblib")
         self.model = Path(self.artifacts_folder,"model_honeypot.joblib")
         self.core = Path(self.artifacts_folder,"core_dataset.parquet")
+        self.clustering_results_folder = Path(self.artifacts_folder,"clustering_results")
+        self.clustering_results_folder.mkdir(parents=True, exist_ok=True)
+        self.clustered_result = Path(self.clustering_results_folder,"clustered_result.parquet")
+        self.clustered_normalized = Path(self.clustering_results_folder,"clustered_normalized.parquet")

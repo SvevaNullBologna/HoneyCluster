@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Tuple
 
-from MachineLearning.command_vocabularies import TLS_MAGIC_CLEANED, HTTP_VERBS_CLEANED, MAX_SIGNATURE_SCORE
+from MachineLearning.command_vocabularies import MAX_SIGNATURE_SCORE
 from MachineLearning.command_vocabularies import _SIGNATURES, SIGNATURE_WEIGHTS
 
 
@@ -104,9 +104,15 @@ def get_command_diversity_ratio(verbs: list[str] = None, all_known_verbs: set[st
     if not verbs or not all_known_verbs: return 0.0
 
     unique_verbs = set(verbs)
-    unknown_verbs = unique_verbs - all_known_verbs # è la differenza tra due insiemi, non tra numeri
-    known_verbs = unique_verbs - unknown_verbs
-    return len(known_verbs)/len(all_known_verbs) + bonus * len(unknown_verbs)/len(all_known_verbs) # premiamo quando non conosciamo il verbo usato
+    if not unique_verbs:
+        return 0.0
+
+    known_count = sum(1 for v in unique_verbs if v in all_known_verbs)
+    unknown_count = len(unique_verbs) - known_count
+
+    base_diversity = len(unique_verbs)/len(verbs)
+    rarity_bonus = (unknown_count * bonus) / len(unique_verbs)
+    return min(base_diversity + rarity_bonus, 1.0)# premiamo quando non conosciamo il verbo usato
 
 def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
     """ Calcola lo score di expertise basato sulle firme attivate -> quanto è bravo un attaccante a seconda dei tool usati """
@@ -115,19 +121,20 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
 
     found_signatures = set()
 
-    for status in statuses :
-        if is_fingerprint(status):
-            found_signatures.add("fingerprinting")
+    if statuses:
+        for status in statuses :
+            if is_fingerprint(status):
+                found_signatures.add("fingerprinting")
 
-        if is_version(status):
-            found_signatures.add("versioning")
+            if is_version(status):
+                found_signatures.add("versioning")
 
-        if ZDR.Status.TCPIP_REQUEST.value in statuses:
-            found_signatures.add("tunneling_request")
+            if ZDR.Status.TCPIP_REQUEST.value in statuses:
+                found_signatures.add("tunneling_request")
 
-        login_occurrence = ZDR.count_logins(statuses)
-        if len(statuses) > 0 and (login_occurrence / len(statuses) >= 0.6):
-            found_signatures.add("login_occurrence")
+            login_occurrence = ZDR.count_logins(statuses)
+            if len(statuses) > 0 and (login_occurrence / len(statuses) >= 0.6):
+                found_signatures.add("login_occurrence")
 
     if verbs: #ci sono
         verbs_set = set(verbs)
@@ -137,11 +144,9 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
                 found_signatures.add(sig_name)
 
         # TUNNELING (Pattern matching su stringhe magiche)
-        if any(v in TLS_MAGIC_CLEANED for v in verbs):
-            found_signatures.add("tunneling_tls")
-
-        if any(v in HTTP_VERBS_CLEANED for v in verbs):
-            found_signatures.add("tunneling_http")
+        for v in verbs_set:
+            if v in SIGNATURE_WEIGHTS:  # Se il verbo è una delle chiavi pesate (es. TLS_1.2)
+                found_signatures.add(v)
 
     if not found_signatures:
         return 0.0
@@ -153,8 +158,8 @@ def get_tool_signatures(statuses: list[int], verbs: list[str]) -> float:
     EXTRACT BEHAVIORAL PATTERNS 
 """
 
-def get_reconnaissance_vs_exploitation_ratio(statuses: list[int], verbs : list[str], all_recon: set, all_exploit: set)-> float:
-    """ calcola il rapporto tra verbi di ricerca e verbi di attacco """
+def get_reconnaissance_vs_exploitation_ratio(statuses: list[int], verbs: list[str], all_recon: set, all_exploit: set) -> float:
+    """ Calcola il rapporto tra attività di ricognizione e attacco """
     recon_count = 0
     exploit_count = 0
 
@@ -164,15 +169,20 @@ def get_reconnaissance_vs_exploitation_ratio(statuses: list[int], verbs : list[s
         exploit_count += ZDR.count_tunneling(statuses)
 
     if verbs:
-        recon_count += sum(1 for v in verbs if v in all_recon)
-        exploit_count += sum(1 for v in verbs if v in all_exploit)
+        for v in verbs:
+            if v in all_recon:
+                recon_count += 1
+            elif v in all_exploit:
+                exploit_count += 1
+            # I probe di tunneling (TLS/HTTP) sono tecnicamente ricognizione/tunneling
+            elif v.startswith("TLS_") or v.startswith("HTTP_") or v == "UNKNOWN_PROBE":
+                exploit_count += 1 # Il tunneling è considerato un'azione attiva (exploitation)
 
     total = recon_count + exploit_count
-
     if total == 0:
         return 0.5
 
-    return exploit_count / total # 0 = puro recon, 1 = puro exploit
+    return exploit_count / total
 
 
 def get_error_rate(statuses: list[int] = None)-> float:
@@ -181,16 +191,14 @@ def get_error_rate(statuses: list[int] = None)-> float:
         return 0.0
 
     attempts = [status for status in statuses if ZDR.is_only_command(status) or ZDR.is_login(status)]
-    # ignoriamo versioning e tunneling perché non sappiamo determinare se sono andati a buon fine
     if not attempts:
-        return 0.0
+        return 0.5
 
-    failures = [attempt for attempt in attempts if attempt == ZDR.Status.COMMAND_FAILED.value or attempt == ZDR.Status.LOGIN_FAILED.value]
+    successes = [s for s in attempts if s!= ZDR.Status.COMMAND_FAILED.value and ZDR.Status.LOGIN_FAILED.value]
+    return len(successes) / len(attempts)
 
-    return - (len(failures) / len(attempts))
 
-
-def get_command_correction_attempts(statuses: list[int], commands: list[str], login_data: list[tuple[str]]) -> float:
+def get_command_correction_attempts(statuses: list[int], united_commands: list[str], login_data: list[tuple[str]]) -> float:
     # 1. Creiamo una lista unificata filtrata, ma mantenendo l'ordine temporale
     # Usiamo gli indici per evitare i problemi dello zip
     valid_events = []
@@ -202,9 +210,9 @@ def get_command_correction_attempts(statuses: list[int], commands: list[str], lo
     for s in statuses:
         if is_only_command(s):
             # Se è un comando, prendiamo il testo del comando corrispondente
-            if cmd_idx < len(commands):
+            if cmd_idx < len(united_commands):
                 # Aggiungiamo (stato, comando, None)
-                valid_events.append((s, commands[cmd_idx], None))
+                valid_events.append((s, united_commands[cmd_idx], None))
                 cmd_idx += 1
         elif is_login(s):
             # Se è un login, prendiamo i dati del login corrispondenti

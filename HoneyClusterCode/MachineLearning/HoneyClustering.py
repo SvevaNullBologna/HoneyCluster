@@ -11,6 +11,42 @@ from Zenodo.ZenodoProcesser import read_main_dataset
 from joblib import dump,load
 
 
+def clustering(honey_paths: HoneyClusterPaths):
+    try:
+
+        sample_data = _extraction_of_initial_clustering_subset(honey_paths.base_folder)
+
+        # recupero lo stato precedente se esiste
+        scaler = _get_scaler(honey_paths.scaler)
+        model = _get_model(honey_paths.model)
+
+        # preparo i dati (e salvo lo scaler aggiornato)
+        scaled_sample_data, scaler = _build_scaled_core_model(sample_data, honey_paths.scaler,
+                                                              scaler)  # aggiorna automaticamente lo scaler
+
+        # il dataset core che stiamo usando (è un subset, quindi è importante metterlo da parte?)
+
+        labels = _creating_clusters(scaled_sample_data, honey_paths.model, model)  # aggiorna automaticamente il model
+        # otteniamo una lista del tipo [1,1, 0, 2, 1].
+        # ogni sessione viene assegnata al centroide più vicino
+        # invece che analizzare milioni di file, possiamo analizzare i 'rappresentanti' dei gruppi
+
+        clustered_sample_data = sample_data.copy()
+        clustered_sample_data[
+            'cluster_id'] = labels  # aggiungiamo una colonna chiamata id del cluster e ci mettiamo le label
+
+        _writing_as_parquet(clustered_sample_data, honey_paths.clustered_result)
+        _writing_as_parquet(scaled_sample_data, honey_paths.clustered_normalized)
+
+    except Exception as e:
+        logging.debug(f"errore nel clustering: {e}")
+
+
+
+"""
+//////////////////////////////////////////PIPELINE CLUSTERING////////////////////////////////
+"""
+
 def _extraction_of_initial_clustering_subset(base_folder_path: Path, n_samples: int = 200000) -> pd.DataFrame: # RAISES EXCEPTION!
     logging.info("Caricamento dataset principale")
     df = read_main_dataset(base_folder_path)
@@ -94,40 +130,15 @@ def _creating_clusters(scaled_core, model_path: Path, old_model: KMeans = None):
 
     return labels
 
-def clustering(honey_paths: HoneyClusterPaths):
-    try:
-
-        sample_data = _extraction_of_initial_clustering_subset(honey_paths.base_folder)
-
-        # recupero lo stato precedente se esiste
-        scaler = _get_scaler(honey_paths.scaler)
-        model = _get_model(honey_paths.model)
-
-        # preparo i dati (e salvo lo scaler aggiornato)
-        scaled_sample_data, scaler = _build_scaled_core_model(sample_data, honey_paths.scaler, scaler) # aggiorna automaticamente lo scaler
-
-        # il dataset core che stiamo usando (è un subset, quindi è importante metterlo da parte?)
-
-        labels = _creating_clusters(scaled_sample_data,honey_paths.model,model) #aggiorna automaticamente il model
-        #otteniamo una lista del tipo [1,1, 0, 2, 1].
-        #ogni sessione viene assegnata al centroide più vicino
-        #invece che analizzare milioni di file, possiamo analizzare i 'rappresentanti' dei gruppi
-
-        clustered_sample_data = sample_data.copy()
-        clustered_sample_data['cluster_id'] = labels # aggiungiamo una colonna chiamata id del cluster e ci mettiamo le label
-
-        return clustered_sample_data, scaled_sample_data
-    except Exception as e:
-        print(e)
-        return None, None
-
+def _writing_as_parquet(clustered_data: pd.DataFrame, output_path: Path):
+    clustered_data.to_parquet(output_path)
 
 
 
 
 
 if __name__ == "__main__":
-    #logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.DEBUG)
     paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-    clustered_dataset, scaled_dataset = clustering(paths)
+    clustering(paths)
 

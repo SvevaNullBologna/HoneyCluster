@@ -10,10 +10,7 @@ import MachineLearning.HoneyClusterData as HCD
 from Main.HoneyCluster import HoneyClusterPaths
 from Zenodo.ZenodoDataReader import Cleaned_Attr
 
-from MachineLearning.command_vocabularies import get_all_known_verbs, get_recon_exploit_flat
-
-
-
+from MachineLearning.command_vocabularies import get_all_known_verbs, get_recon_exploit_flat, get_fast_check_set
 
 """
 ///////////////////////////////////////////////////////////////////////////////////////////////OTTENIMENTO DATASET COMPLETO PER ML/////////////////////////////////////////////////////////////////////////////
@@ -89,7 +86,7 @@ def process_cleaned_dataset(starting_path: Path, resulting_path : Path): # proce
             logging.warning(f"Errore durante il processamento di {json_file.name}: {e}")
 
 
-def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: set[str] = None, all_recon: set[str] = None, all_exploit: set[str] = None): # processa un singolo cleaned file
+def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: set[str] = None, all_recon: set[str] = None, all_exploit: set[str] = None, fast_check: set[str] = None): # processa un singolo cleaned file
     if not os.path.exists(json_file):
         logging.warning(f"{json_file} does not exist")
         return
@@ -102,9 +99,10 @@ def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: s
     if not all_recon or not all_exploit:
         all_recon, all_exploit = get_recon_exploit_flat()
 
+    if not fast_check:
+        fast_check = get_fast_check_set()
+
     with open(json_file, 'rb') as f:
-
-
         for session_data in ijson.items(f, 'item'):
             start_time = session_data[ZDR.Cleaned_Attr.START_TIME.value]
             start_time = ZDR.get_datetime(start_time)
@@ -116,6 +114,7 @@ def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: s
             statuses = [] # stati equivalenti al tipo di evento
             timestamps = [] # tempi
             commands = [] # tunneling e comandi ssh
+            united_commands = []
             verbs = [] # inizio dei comandi (utile per analisi, contiene anche quelli del tunneling)
             user_pass = []
 
@@ -125,12 +124,15 @@ def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: s
                 timestamp = event[Cleaned_Attr.TIME.value]
                 timestamps.append(ZDR.get_datetime(timestamp))
 
-                command = event.get(Cleaned_Attr.MSG.value, "")
-                if command:
-                    commands.append(command)
-                    verb = ZDR.get_verb_of_command(command)
-                    if verb:
-                        verbs.append(verb)
+                all_event_command = event.get(Cleaned_Attr.MSG.value, []) # now command is a list of strings
+                if all_event_command:
+                    united_command = "; ".join(all_event_command)
+                    united_commands.append(united_command)
+                    for command in all_event_command:
+                        commands.append(command)
+                        verb = ZDR.get_verb_of_command(command,fast_check)
+                        if verb:
+                            verbs.append(verb)
 
                 login_tuple = ZDR.get_tuple_login_data(event)
                 if login_tuple:
@@ -148,7 +150,7 @@ def process_to_parquet(json_file: Path, output_parquet: Path, all_known_verbs: s
                 tool_signatures=HCD.get_tool_signatures(statuses, verbs),
                 reconnaissance_vs_exploitation_ratio=HCD.get_reconnaissance_vs_exploitation_ratio(statuses, verbs, all_recon, all_exploit),
                 error_rate=HCD.get_error_rate(statuses),
-                command_correction_attempts=HCD.get_command_correction_attempts(statuses, commands, user_pass)
+                command_correction_attempts=HCD.get_command_correction_attempts(statuses, united_commands, user_pass)
             )
 
             all_sessions_in_file.append(data_obj.__dict__)
