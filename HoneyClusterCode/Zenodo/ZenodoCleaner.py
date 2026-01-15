@@ -128,17 +128,16 @@ def DEBUG_from_all_files_print_commands(jsonpath : Path, out_commands: Path) -> 
                         eventid = event.get(ZK.Useful_Cowrie_Attr.EVENTID.value)
                         status = ZK.get_status(eventid)
                         if ZK.is_only_command(status):
-                            logging.info(f"Command {status}")
                             msg = event.get(ZK.Useful_Cowrie_Attr.MSG.value)
                             if msg:
                                 commands.append(msg)
                         if status == ZK.Event.TCPIP_DATA:
+                            logging.info(f"Data {status}")
                             data = event.get(ZK.Useful_Cowrie_Attr.DATA.value)
                             logging.debug(data)
                             if msg:
                                 commands.append(data)
                 if commands:
-                    logging.debug(f"commands: {commands}")
                     with open(out_commands, "a", encoding="utf-8") as out:
                         out.writelines('\n\n'.join(commands))
 
@@ -146,6 +145,6 @@ def DEBUG_from_all_files_print_commands(jsonpath : Path, out_commands: Path) -> 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    clean_zenodo_dataset(HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")))
-    #DEBUG_from_all_files_print_commands(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\original"))
+    #clean_zenodo_dataset(HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset")))
+    DEBUG_from_all_files_print_commands(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset\\original"), Path("C:\\Users\\Sveva\\Desktop\\comandi.txt"))
 
