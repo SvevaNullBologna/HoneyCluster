@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -6,10 +7,34 @@ import seaborn as sns
 import pandas as pd
 from sklearn.decomposition import PCA
 
+from Main.HoneyCluster import HoneyClusterPaths
 
 TEMPORAL_FEATURES = ['inter_command_timing', 'session_duration', 'time_of_day_patterns_sin', 'time_of_day_patterns_cos']
 COMMAND_FEATURES = ['unique_commands_ratio', 'command_diversity_ratio', 'tool_signatures']
 BEHAVIORAL_FEATURES = ['reconnaissance_vs_exploitation_ratio', 'error_rate', 'command_correction_attempts']
+
+
+
+def analizing(paths: HoneyClusterPaths):
+    clusters_df = read_dataset(paths.clustered_result)
+    normalized_df = read_dataset(paths.clustered_normalized)
+
+    if clusters_df.empty or normalized_df.empty:
+        return
+
+"""
+////////////////////////////////////////PIPELINE FOR ANALIZING//////////////////////////////////////////////////////////////////////////////////
+"""
+
+def read_dataset(dataset_path: Path) -> pd.DataFrame:
+    try:
+        df = pd.read_parquet(dataset_path)
+        return df
+    except Exception as e:
+        logging.debug(f"errore nel file di clustering: {e}")
+        return pd.DataFrame()
+
+
 
 #quello che serve a noi:
 def plot_feature(df: pd.DataFrame, feature_name: str):
@@ -118,3 +143,4 @@ def analysis_of_cluster(resulting_dataset: pd.DataFrame, scaled_dataset: pd.Data
     stats = resulting_dataset.groupby('cluster_id').mean()
     stats['count'] = resulting_dataset.groupby('cluster_id').size()
     return stats
+

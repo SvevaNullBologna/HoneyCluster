@@ -18,17 +18,17 @@ def _print_menu():
     print("Remember: you can stop and continue the cleaning and processing whenever you want\njust remember to erase (JUST) the last modified file")
     print("\n\nenter your number:")
 
-def _ask_number()-> int :
+def _ask_number()-> int | None :
     while True:
         _print_menu()
-        number = input()
+        n = input()
         try:
-            number = int(number)
+            n = int(n)
         except ValueError:
             print("please enter a valid number")
             continue
-        if number in range(1, 7):
-                return number
+        if n in range(1, 7):
+                return n
         else:
             print("invalid selection. Please, try again")
 
