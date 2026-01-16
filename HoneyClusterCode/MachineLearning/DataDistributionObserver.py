@@ -15,17 +15,29 @@ from HoneyClustering import TEMPORAL_FEATURES, COMMAND_FEATURES, BEHAVIORAL_FEAT
 
 def analizing(paths: HoneyClusterPaths):
     datasets = get_all_datasets(paths)
-    #show_all_box_plot_features(datasets["global"], "global")
-    #show_all_box_plot_features(datasets["expertise"], "expertise")
+    _show_all_box_plot_features(datasets["global"], "global")
+    _show_all_box_plot_features(datasets["expertise"], "expertise")
 
-    get_resulting_analysis_output(datasets, paths)
+    _get_resulting_analysis_output(datasets, paths)
 
-    #plot_pca(datasets["global"])
-    #plot_pca(datasets["expertise"])
+    for mode in ["global", "expertise"]:
+        df = datasets[mode]
+        if df.empty: continue
 
-    #plot_pca_selected_features(datasets["temporal"], TEMPORAL_FEATURES, "temporal", "temporal features")
-    #plot_pca_selected_features(datasets["command_based"], COMMAND_FEATURES, "command_based", "command based features")
-    #plot_pca_selected_features(datasets["behavioral"], BEHAVIORAL_FEATURES, "behavioral", "behavioral features")
+        # Cerchiamo la colonna cluster (es: cluster_global_id o cluster_expertise_id)
+        c_col = [c for c in df.columns if f'cluster_{mode}' in c][0]
+
+        print(f"Generando grafici PCA per {mode}...")
+        plot_pca_selected_features(df, TEMPORAL_FEATURES, c_col, f"{mode.upper()}: Analisi Temporale")
+        plot_pca_selected_features(df, COMMAND_FEATURES, c_col, f"{mode.upper()}: Analisi Comandi")
+        plot_pca_selected_features(df, BEHAVIORAL_FEATURES, c_col, f"{mode.upper()}: Analisi Comportamentale")
+
+        # 3. Visualizzazione per i dataset specifici (Feature Clustering)
+    plot_pca_selected_features(datasets["temporal"], TEMPORAL_FEATURES, "cluster_temporal_id", "Clustering Temporale")
+    plot_pca_selected_features(datasets["command_based"], COMMAND_FEATURES, "cluster_command_based_id",
+                               "Clustering Comandi")
+    plot_pca_selected_features(datasets["behavioral"], BEHAVIORAL_FEATURES, "cluster_behavioral_id",
+                               "Clustering Comportamentale")
 """
 ////////////////////////////////////////PIPELINE FOR ANALIZING//////////////////////////////////////////////////////////////////////////////////
 """
@@ -49,7 +61,11 @@ def get_all_datasets(paths: HoneyClusterPaths) -> dict:
     }
 
 
-def show_all_box_plot_features(df: pd.DataFrame, cluster_column_name: str) :
+
+"""
+#####BOXPLOT######
+"""
+def _show_all_box_plot_features(df: pd.DataFrame, cluster_column_name: str) :
     # Rimuoviamo colonne non numeriche o cluster_id per non fare confusione
     df_plot = df.drop(columns=[f"cluster_{cluster_column_name}_id"], errors="ignore")
     # Selezioniamo solo le colonne numeriche (il boxplot non funziona sulle stringhe)
@@ -80,47 +96,68 @@ def show_all_box_plot_features(df: pd.DataFrame, cluster_column_name: str) :
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
-def plot_pca(df: pd.DataFrame) -> None:
-    pass
+
+"""
+####Principal Component Analysis (PCA) : show dots on graph##### 
+"""
+
+
+def plot_pca(df: pd.DataFrame, title: str = "PCA Global"):
+    """
+    Esegue la PCA su tutte le feature numeriche del dataset.
+    """
+    # Seleziona solo le colonne numeriche ed esclude i cluster_id
+    features = df.select_dtypes(include=['number']).columns
+    features = [c for c in features if 'cluster' not in c]
+
+    cluster_col = [c for c in df.columns if 'cluster' in c and '_id' in c]
+    label = cluster_col[0] if cluster_col else None
+
+    plot_pca_selected_features(df, list(features), label, title)
+
 
 def plot_pca_selected_features(df: pd.DataFrame, selected_features: list, cluster_column: str, title: str):
     """
-    PCA su colonne selezionate (es. TEMPORAL_FEATURES, COMMAND_FEATURES, BEHAVIORAL_FEATURES)
-    Se cluster_column è None, non coloriamo per cluster.
+    PCA mirata su un gruppo di feature. Gestisce automaticamente 2 o più cluster.
     """
-    if df.empty or len(selected_features) == 0:
+    if df.empty:
         return
 
+    # Pulizia dati per la PCA
     X = df[selected_features].dropna()
-    labels = None
-    if cluster_column:
-        cluster_column = f"cluster_{cluster_column}_id"
-        labels = df.loc[X.index, cluster_column]
+    if X.empty: return
 
     pca = PCA(n_components=2)
     components = pca.fit_transform(X)
 
-    pca_df = pd.DataFrame(components, columns=['PC1', 'PC2'])
-    if labels is not None:
-        pca_df['Cluster'] = labels.values
+    plt.figure(figsize=(10, 7))
 
-    plt.figure(figsize=(8, 6))
-    if labels is not None:
-        sns.scatterplot(x='PC1', y='PC2', hue='Cluster', palette='tab10', data=pca_df, s=60, alpha=0.8)
+    # Se abbiamo una colonna cluster, la usiamo per il colore
+    if cluster_column in df.columns:
+        sns.scatterplot(
+            x=components[:, 0],
+            y=components[:, 1],
+            hue=df.loc[X.index, cluster_column],
+            palette='viridis',  # 'viridis' si adatta bene sia a 2 che a 3 cluster
+            alpha=0.7,
+            s=60
+        )
+        plt.legend(title=f"Cluster ({cluster_column})")
     else:
-        sns.scatterplot(x='PC1', y='PC2', data=pca_df, s=60, alpha=0.8, color="skyblue")
+        plt.scatter(components[:, 0], components[:, 1], alpha=0.5, color='skyblue')
 
-    if not title:
-        title = "PCA su feature selezionate"
-    plt.title(title)
-    plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% varianza)")
-    plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% varianza)")
-    plt.legend(title='Cluster') if labels is not None else None
-    plt.tight_layout()
+    var_exp = pca.explained_variance_ratio_
+    plt.title(f"{title}\n(Varianza spiegata: PC1={var_exp[0]:.1%}, PC2={var_exp[1]:.1%})")
+    plt.xlabel("Componente Principale 1")
+    plt.ylabel("Componente Principale 2")
+    plt.grid(True, linestyle='--', alpha=0.6)
     plt.show()
 
+"""
+######SUMMARY ANALYSIS TABLE##########
+"""
 
-def get_resulting_analysis_output(datasets: dict, paths: HoneyClusterPaths):
+def _get_resulting_analysis_output(datasets: dict, paths: HoneyClusterPaths):
     all_data = []
     for dataset_type, dataset in datasets.items():
         if dataset.empty:

@@ -1,7 +1,8 @@
+import logging
 import os
 from Zenodo.ZenodoCleaner import clean_zenodo_dataset
 from Zenodo.ZenodoProcesser import process_dataset
-from MachineLearning.HoneyClustering import clustering
+from MachineLearning.HoneyClustering import clustering, expertise_clustering, features_clustering
 from MachineLearning.DataDistributionObserver import analizing
 from HoneyCluster import HoneyClusterPaths
 from pathlib import Path
@@ -80,7 +81,12 @@ def compute_clustering(paths : HoneyClusterPaths | None):
     if paths is None :
         print("set base folder path first!")
         return
+    print("computing global clustering...")
     clustering(paths)
+    logging.info("computing expertise clustering...")
+    expertise_clustering(paths)
+    logging.info("computing features clustering...")
+    features_clustering(paths)
 
 def analysis(paths: HoneyClusterPaths | None):
     if paths is None :
