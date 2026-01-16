@@ -22,7 +22,7 @@ def clustering(honey_paths: HoneyClusterPaths): # dimostra quanto i bot appiatti
         model = _get_model(honey_paths.model_path)
 
         # preparo i dati (e salvo lo scaler aggiornato)
-        scaled_sample_data, scaler = _build_scaled_core_model(sample_data, honey_paths.scaler_path,scaler)  # aggiorna automaticamente lo scaler
+        scaled_sample_data = _build_scaled_core_model(sample_data, honey_paths.scaler_path,scaler)  # aggiorna automaticamente lo scaler
 
         # il dataset core che stiamo usando (è un subset, quindi è importante metterlo da parte?)
 
@@ -32,7 +32,7 @@ def clustering(honey_paths: HoneyClusterPaths): # dimostra quanto i bot appiatti
         # invece che analizzare milioni di file, possiamo analizzare i 'rappresentanti' dei gruppi
 
         clustered_sample_data = sample_data.copy()
-        clustered_sample_data['cluster_id'] = labels  # aggiungiamo una colonna chiamata id del cluster e ci mettiamo le label
+        clustered_sample_data['cluster_global_id'] = labels  # aggiungiamo una colonna chiamata id del cluster e ci mettiamo le label
 
         _writing_as_parquet(clustered_sample_data, honey_paths.clustered_result)
 
@@ -41,32 +41,50 @@ def clustering(honey_paths: HoneyClusterPaths): # dimostra quanto i bot appiatti
 
 def expertise_clustering(honey_paths: HoneyClusterPaths):
     # which df shoud I pass? The extracted initial clustering from the function "_extraction_of_initial_clustering_subset"?
-    initial_dataset = ?
+    initial_dataset = read_main_dataset(honey_paths.complete_dataset_file)
+
+    if initial_dataset.empty:
+        logging.warning("dataset vuoto")
+        raise Exception("dataset vuoto")
+
     try:
-        df = expertise_stage_1(initial_dataset)
-        expertise_stage_2(df,honey_paths)
+        df = _expertise_stage_1(initial_dataset)
+        clustered_df = _expertise_stage_2(df,honey_paths)
+        _writing_as_parquet(clustered_df, honey_paths.clustered_for_expertise_result)
     except Exception as e:
         logging.debug(f"errore nell'expertise clustering: {e}")
 
 def features_clustering(honey_paths: HoneyClusterPaths):
-    feature_clustering_time()
-    feature_clustering_command()
-    feature_clustering_behavior()
+    initial_dataset = read_main_dataset(honey_paths.complete_dataset_file)
 
+    if initial_dataset.empty:
+        logging.warning("dataset vuoto")
+        raise Exception("dataset vuoto")
+
+    try:
+        _feature_clustering_time(initial_dataset,honey_paths)
+        _feature_clustering_command(initial_dataset,honey_paths)
+        _feature_clustering_behavior(initial_dataset,honey_paths)
+    except Exception as e:
+        logging.debug(f"errore nell'feature clustering: {e}")
 
 """
 /////////////////////////////////////////////////EXPERTISE CLUSTERING///////////////////////////////////////////////////////////////////////////////////////
 """
 
-def expertise_stage_1(raw_complete_dataset: pd.DataFrame) -> pd.DataFrame:
+def _expertise_stage_1(raw_complete_dataset: pd.DataFrame) -> pd.DataFrame:
     df = raw_complete_dataset.copy()
 
-    df['is_bot'] = (df['unique_commands_ratio'] < 0.25) & (df['command_diversity_ratio'] < 0.2) & (df['tool_signatures'] == 0) & (df['session_duration']<300)
-
+    # Versione corretta sintatticamente
+    df['is_bot'] = (
+            (df['inter_command_timing'] < 2) &
+            (df['unique_commands_ratio'] < 0.1) &
+            (df['command_correction_attempts'] == 0.0)
+    )
     logging.info(f"Bot detected: {df['is_bot'].mean() * 100:.2f}%")
     return df
 
-def expertise_stage_2(df: pd.DataFrame, honey_paths: HoneyClusterPaths) -> pd.DataFrame:
+def _expertise_stage_2(df: pd.DataFrame, honey_paths: HoneyClusterPaths) -> pd.DataFrame:
     """ clustering sugli attackers interattivi """
 
     df_interactive = df[~df['is_bot']].copy()
@@ -82,7 +100,7 @@ def expertise_stage_2(df: pd.DataFrame, honey_paths: HoneyClusterPaths) -> pd.Da
     scaled_interactive = _build_scaled_core_model(df_interactive[feature_cols],honey_paths.expertise_scaler_path, scaler)
     labels = _creating_clusters(scaled_interactive, honey_paths.expertise_model_path, model, n_clusters = 2)
 
-    df_interactive['cluster_id'] = labels
+    df_interactive['cluster_expertise_id'] = labels
     return df_interactive
 """
 /////////////////////////////////////////////////FEATURE CLUSTERING//////////////////////////////////////////////////////////////////////////////////////////
@@ -93,18 +111,39 @@ TEMPORAL_FEATURES = ['inter_command_timing', 'session_duration', 'time_of_day_pa
 COMMAND_FEATURES = ['unique_commands_ratio', 'command_diversity_ratio', 'tool_signatures']
 BEHAVIORAL_FEATURES = ['reconnaissance_vs_exploitation_ratio', 'error_rate', 'command_correction_attempts']
 
-def feature_clustering_time():
-    return _feature_clustering(df, TEMPORAL_FEATURES, "cluster_temporal")
+def _feature_clustering_time(df: pd.DataFrame, honey_paths: HoneyClusterPaths):
+    clustered_df = _feature_clustering(df, TEMPORAL_FEATURES, "temporal", honey_paths)
+    _writing_as_parquet(clustered_df, honey_paths.clustered_for_time_result)
 
-def feature_clustering_command():
-    return _feature_clustering(df, COMMAND_FEATURES, 'cluster_command')
+def _feature_clustering_command(df: pd.DataFrame, honey_paths: HoneyClusterPaths):
+    clustered_df = _feature_clustering(df, COMMAND_FEATURES, 'command_based', honey_paths)
+    _writing_as_parquet(clustered_df, honey_paths.clustered_for_command_result)
 
-def feature_clustering_behavior():
-    return _feature_clustering(df, BEHAVIORAL_FEATURES, 'cluster_behavioral')
+def _feature_clustering_behavior(df: pd.DataFrame, honey_paths: HoneyClusterPaths):
+    clustered_df = _feature_clustering(df, BEHAVIORAL_FEATURES, 'behavioral', honey_paths)
+    _writing_as_parquet(clustered_df, honey_paths.clustered_for_behavior_result)
 
+def _feature_clustering(dataset: pd.DataFrame, features: list, label_name: str, honey_paths: HoneyClusterPaths):
+    if dataset.empty:
+        logging.warning("dataset vuoto")
+        raise Exception("dataset vuoto")
 
-def _feature_clustering(dataset: pd.DataFrame, features: list, label_name: str):
-    pass
+    scaler_feature_path = honey_paths.scalers_folder.joinpath(label_name + ".joblib")
+    scaler = _get_scaler(scaler_feature_path)
+
+    feature_dataset = dataset[features]
+
+    scaled_feature_dataset = _build_scaled_core_model(feature_dataset, scaler_feature_path , scaler )
+
+    model_feature_path = honey_paths.models_folder.joinpath(label_name + ".joblib")
+    model = _get_model(model_feature_path)
+
+    labels = _creating_clusters(scaled_feature_dataset, model_feature_path, model, n_clusters = 2)
+
+    dataset[f'cluster_{label_name.strip()}_id'] = labels
+
+    return dataset
+
 """
 //////////////////////////////////////////PIPELINE CLUSTERING////////////////////////////////
 """
@@ -141,6 +180,7 @@ def _extraction_of_initial_clustering_subset(complete_dataset: Path, n_samples: 
     return df_final.sample(frac=1, random_state=42).reset_index(drop=True)
 
 
+
 def _get_scaler(scaler_path: Path):
     try:
         scaler = load(scaler_path)
@@ -172,7 +212,7 @@ def _build_scaled_core_model(dataset: pd.DataFrame, scaler_path: Path, old_scale
 
     _save_scaler(scaler, scaler_path) # salviamo lo scaler in un file
 
-    return scaled, scaler # restituiamo i dati scalati
+    return scaled # restituiamo i dati scalati
 
 def _creating_clusters(scaled_core, model_path: Path, old_model: KMeans = None, n_clusters : int = 3, n_init : int = 10, max_iter : int = 300, random_state : int = 42):
     if not old_model:
@@ -206,4 +246,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
     clustering(paths)
+    features_clustering(paths)
+    expertise_clustering(paths)
+
 

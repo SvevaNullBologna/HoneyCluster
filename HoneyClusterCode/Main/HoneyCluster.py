@@ -26,13 +26,13 @@ class HoneyClusterPaths:
         self.scalers_folder.mkdir(parents=True, exist_ok=True)
         self.scaler_path = self.scalers_folder / "scaler.joblib"
         self.expertise_scaler_path = self.scalers_folder / "expertise_scaler.joblib"
-        self.features_scaler_path = self.scalers_folder / "features_scaler.joblib"
+        # different scalers for different features
         # MODELS
         self.models_folder = Path(self.artifacts_folder, "models")
         self.models_folder.mkdir(parents=True, exist_ok=True)
         self.model_path = self.models_folder / "model.joblib"
         self.expertise_model_path = self.models_folder / "expertise_model.joblib"
-        self.features_model_path = self.models_folder / "features_model.joblib"
+        # different models for different features
         # SAMPLED DATASET
         self.core = Path(self.artifacts_folder,"core_dataset.parquet")
         # CLUSTERING RESULTS
@@ -46,3 +46,10 @@ class HoneyClusterPaths:
         self.clustered_for_time_result = Path(self.clustering_results_folder,"clustered_for_features_result.parquet")
         self.clustered_for_command_result = Path(self.clustering_results_folder,"clustered_for_command_result.parquet")
         self.clustered_for_behavior_result = Path(self.clustering_results_folder, "clustered_for_behavior_result.parquet")
+
+        """
+            CLUSTERING -> ANALYSIS 
+        """
+        self.analysis_result_folder = Path(self.base_folder,"analysis_result")
+        self.analysis_result_folder.mkdir(parents=True, exist_ok=True)
+        self.analysis_result_path = Path(self.analysis_result_folder,"analysis_result.parquet")

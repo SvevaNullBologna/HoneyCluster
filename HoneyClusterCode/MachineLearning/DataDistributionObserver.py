@@ -9,16 +9,23 @@ from sklearn.decomposition import PCA
 
 from Main.HoneyCluster import HoneyClusterPaths
 
+from HoneyClustering import TEMPORAL_FEATURES, COMMAND_FEATURES, BEHAVIORAL_FEATURES
 
 
 
 def analizing(paths: HoneyClusterPaths):
-    clusters_df = read_dataset(paths.clustered_result)
-    normalized_df = read_dataset(paths.clustered_normalized)
+    datasets = get_all_datasets(paths)
+    #show_all_box_plot_features(datasets["global"], "global")
+    #show_all_box_plot_features(datasets["expertise"], "expertise")
 
-    if clusters_df.empty or normalized_df.empty:
-        return
+    get_resulting_analysis_output(datasets, paths)
 
+    #plot_pca(datasets["global"])
+    #plot_pca(datasets["expertise"])
+
+    #plot_pca_selected_features(datasets["temporal"], TEMPORAL_FEATURES, "temporal", "temporal features")
+    #plot_pca_selected_features(datasets["command_based"], COMMAND_FEATURES, "command_based", "command based features")
+    #plot_pca_selected_features(datasets["behavioral"], BEHAVIORAL_FEATURES, "behavioral", "behavioral features")
 """
 ////////////////////////////////////////PIPELINE FOR ANALIZING//////////////////////////////////////////////////////////////////////////////////
 """
@@ -32,18 +39,19 @@ def read_dataset(dataset_path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def get_all_datasets(paths: HoneyClusterPaths) -> dict:
+    return {
+        "global": read_dataset(paths.clustered_result),
+        "expertise": read_dataset(paths.clustered_for_expertise_result),
+        "temporal": read_dataset(paths.clustered_for_time_result),
+        "command_based": read_dataset(paths.clustered_for_command_result),
+        "behavioral": read_dataset(paths.clustered_for_behavior_result)
+    }
 
-#quello che serve a noi:
-def plot_feature(df: pd.DataFrame, feature_name: str):
-    plt.figure(figsize=(5, 10))
-    plt.title(f"Analisi della caratteristica: {feature_name}")
-    sns.boxplot(y=df[feature_name], color="skyblue")
-    plt.ylabel(feature_name)
-    plt.show()
 
-def show_all_features(df: pd.DataFrame):
+def show_all_box_plot_features(df: pd.DataFrame, cluster_column_name: str) :
     # Rimuoviamo colonne non numeriche o cluster_id per non fare confusione
-    df_plot = df.drop(columns=["cluster_id"], errors="ignore")
+    df_plot = df.drop(columns=[f"cluster_{cluster_column_name}_id"], errors="ignore")
     # Selezioniamo solo le colonne numeriche (il boxplot non funziona sulle stringhe)
     df_plot = df_plot.select_dtypes(include=['number'])
 
@@ -72,78 +80,94 @@ def show_all_features(df: pd.DataFrame):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
-def plot_pca_selected_features(df: pd.DataFrame, selected_features: list, labels: pd.Series):
-    """
-    Esegue la PCA solo sulle feature selezionate e visualizza i cluster.
-    """
-    # 1. Filtraggio delle feature
-    df_subset = df[selected_features]
+def plot_pca(df: pd.DataFrame) -> None:
+    pass
 
-    # 2. Esecuzione PCA
+def plot_pca_selected_features(df: pd.DataFrame, selected_features: list, cluster_column: str, title: str):
+    """
+    PCA su colonne selezionate (es. TEMPORAL_FEATURES, COMMAND_FEATURES, BEHAVIORAL_FEATURES)
+    Se cluster_column è None, non coloriamo per cluster.
+    """
+    if df.empty or len(selected_features) == 0:
+        return
+
+    X = df[selected_features].dropna()
+    labels = None
+    if cluster_column:
+        cluster_column = f"cluster_{cluster_column}_id"
+        labels = df.loc[X.index, cluster_column]
+
     pca = PCA(n_components=2)
-    pca_result = pca.fit_transform(df_subset)
+    components = pca.fit_transform(X)
 
-    # 3. Creazione del plot
-    plt.figure(figsize=(12, 8))
-    scatter = sns.scatterplot(
-        x=pca_result[:, 0],
-        y=pca_result[:, 1],
-        hue=labels,
-        palette='viridis',
-        alpha=0.7,
-        s=60,
-        edgecolor='w'
-    )
+    pca_df = pd.DataFrame(components, columns=['PC1', 'PC2'])
+    if labels is not None:
+        pca_df['Cluster'] = labels.values
 
-    # Calcolo della varianza spiegata per i titoli degli assi
-    var_exp = pca.explained_variance_ratio_
-    plt.title(f"PCA - Feature selezionate: {', '.join(selected_features)}", fontsize=14)
-    plt.xlabel(f"PC1 ({var_exp[0]:.2%} varianza spiegata)")
-    plt.ylabel(f"PC2 ({var_exp[1]:.2%} varianza spiegata)")
+    plt.figure(figsize=(8, 6))
+    if labels is not None:
+        sns.scatterplot(x='PC1', y='PC2', hue='Cluster', palette='tab10', data=pca_df, s=60, alpha=0.8)
+    else:
+        sns.scatterplot(x='PC1', y='PC2', data=pca_df, s=60, alpha=0.8, color="skyblue")
 
-    plt.legend(title="Cluster ID", bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True, linestyle='--', alpha=0.4)
+    if not title:
+        title = "PCA su feature selezionate"
+    plt.title(title)
+    plt.xlabel(f"PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% varianza)")
+    plt.ylabel(f"PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% varianza)")
+    plt.legend(title='Cluster') if labels is not None else None
     plt.tight_layout()
     plt.show()
 
-    # Opzionale: stampa l'importanza delle feature (loadings) per PC1 e PC2
-    loadings = pd.DataFrame(
-        pca.components_.T,
-        columns=['PC1', 'PC2'],
-        index=selected_features
-    )
-    print("\nImportanza delle Feature (Loadings) nei primi due componenti:")
-    print(loadings)
 
-def analysis_of_cluster(resulting_dataset: pd.DataFrame, scaled_dataset: pd.DataFrame):
-    logging.info("Generazione grafici di analisi")
+def get_resulting_analysis_output(datasets: dict, paths: HoneyClusterPaths):
+    all_data = []
+    for dataset_type, dataset in datasets.items():
+        if dataset.empty:
+            continue
 
-    show_all_features(resulting_dataset)
+        # Calcoliamo le statistiche ignorando completamente i cluster
+        stats_df = _get_resulting_analysis_datas(dataset)
 
-    # Se scaled_dataset è un numpy array, lo trasformiamo qui al volo
-    if not isinstance(scaled_dataset, pd.DataFrame):
-        # Prendiamo i nomi delle colonne dal dataset originale (escludendo l'id del cluster)
-        feature_names = resulting_dataset.drop(columns=['cluster_id'], errors='ignore').columns
-        scaled_dataset = pd.DataFrame(scaled_dataset, columns=feature_names)
+        if not stats_df.empty:
+            stats_df['dataset_type'] = dataset_type
+            all_data.append(stats_df)
+
+    if not all_data:
+        logging.warning("Nessun dato trovato")
+        return None
+
+    result_df = pd.concat(all_data, axis=0, ignore_index=True)
+
+    # Solo quello che ti serve veramente
+    desired_cols = ['dataset_type', 'feature', 'mean', 'std', 'min', 'median', 'max']
+    result_df = result_df[desired_cols]
+
+    # Salvataggio doppio per comodità
+    result_df.to_parquet(paths.analysis_result_path)
+    result_df.to_csv(paths.analysis_result_path.with_suffix('.csv'), index=False)
+
+    return result_df
 
 
-    plot_pca_selected_features(scaled_dataset, TEMPORAL_FEATURES, resulting_dataset['cluster_id'])
-    plot_pca_selected_features(scaled_dataset, COMMAND_FEATURES, resulting_dataset['cluster_id'])
-    plot_pca_selected_features(scaled_dataset, BEHAVIORAL_FEATURES, resulting_dataset['cluster_id'])
-    plot_pca_selected_features(scaled_dataset, ['inter_command_timing', 'session_duration'],
-                               resulting_dataset['cluster_id'])  # varianza 87%
-    plot_pca_selected_features(scaled_dataset, ['command_diversity_ratio', 'tool_signatures'],
-                               resulting_dataset['cluster_id'])
-    plot_pca_selected_features(scaled_dataset, ['unique_commands_ratio', 'tool_signatures'],
-                               resulting_dataset['cluster_id'])  # 55%
+def _get_resulting_analysis_datas(df: pd.DataFrame):
+    if df.empty:
+        return pd.DataFrame()
 
-    stats = resulting_dataset.groupby('cluster_id').mean()
-    stats['count'] = resulting_dataset.groupby('cluster_id').size()
-    return stats
+    # Prendi solo i numeri (escludendo eventuali ID se presenti)
+    df_numeric = df.select_dtypes(include=['number']).copy()
 
+    # Rimuoviamo preventivamente qualsiasi colonna che puzzi di ID cluster
+    cols_to_drop = [c for c in df_numeric.columns if 'cluster' in c.lower() or 'id' in c.lower()]
+    df_numeric = df_numeric.drop(columns=cols_to_drop)
+
+    # Statistiche "flat" (una riga per feature)
+    stats = df_numeric.agg(['mean', 'std', 'min', 'median', 'max']).transpose()
+    stats.index.name = 'feature'
+
+    return stats.reset_index()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-    pd = read_dataset(paths.clustered_result)
-    show_all_features(pd)
+    honey_paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
+    analizing(honey_paths)
