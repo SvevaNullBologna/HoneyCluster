@@ -9,9 +9,6 @@ from sklearn.decomposition import PCA
 
 from Main.HoneyCluster import HoneyClusterPaths
 
-TEMPORAL_FEATURES = ['inter_command_timing', 'session_duration', 'time_of_day_patterns_sin', 'time_of_day_patterns_cos']
-COMMAND_FEATURES = ['unique_commands_ratio', 'command_diversity_ratio', 'tool_signatures']
-BEHAVIORAL_FEATURES = ['reconnaissance_vs_exploitation_ratio', 'error_rate', 'command_correction_attempts']
 
 
 
