@@ -92,7 +92,7 @@ def analysis(paths: HoneyClusterPaths | None):
     if paths is None :
         print("set base folder path first!")
         return
-    analizing(paths)
+    analizing(paths, True)
 
 if __name__ == "__main__":
     important_paths = None

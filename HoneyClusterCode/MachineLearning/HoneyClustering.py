@@ -34,7 +34,8 @@ def clustering(honey_paths: HoneyClusterPaths): # dimostra quanto i bot appiatti
         clustered_sample_data = sample_data.copy()
         clustered_sample_data['cluster_global_id'] = labels  # aggiungiamo una colonna chiamata id del cluster e ci mettiamo le label
 
-        _writing_as_parquet(clustered_sample_data, honey_paths.clustered_result)
+        _writing_as_parquet(clustered_sample_data, honey_paths.clustered_result.with_suffix(".parquet"))
+        _writing_as_csv(clustered_sample_data, honey_paths.clustered_result.with_suffix(".csv"))
 
     except Exception as e:
         logging.debug(f"errore nel clustering: {e}")
@@ -50,7 +51,8 @@ def expertise_clustering(honey_paths: HoneyClusterPaths):
     try:
         df = _expertise_stage_1(initial_dataset)
         clustered_df = _expertise_stage_2(df,honey_paths)
-        _writing_as_parquet(clustered_df, honey_paths.clustered_for_expertise_result)
+        _writing_as_parquet(clustered_df, honey_paths.clustered_for_expertise_result.with_suffix(".parquet"))
+        _writing_as_csv(clustered_df, honey_paths.clustered_for_time_result.with_suffix(".csv"))
     except Exception as e:
         logging.debug(f"errore nell'expertise clustering: {e}")
 
@@ -113,15 +115,18 @@ BEHAVIORAL_FEATURES = ['reconnaissance_vs_exploitation_ratio', 'error_rate', 'co
 
 def _feature_clustering_time(df: pd.DataFrame, honey_paths: HoneyClusterPaths):
     clustered_df = _feature_clustering(df, TEMPORAL_FEATURES, "temporal", honey_paths)
-    _writing_as_parquet(clustered_df, honey_paths.clustered_for_time_result)
+    _writing_as_parquet(clustered_df, honey_paths.clustered_for_time_result.with_suffix(".parquet"))
+    _writing_as_csv(clustered_df, honey_paths.clustered_for_time_result.with_suffix(".csv"))
 
 def _feature_clustering_command(df: pd.DataFrame, honey_paths: HoneyClusterPaths):
     clustered_df = _feature_clustering(df, COMMAND_FEATURES, 'command_based', honey_paths)
-    _writing_as_parquet(clustered_df, honey_paths.clustered_for_command_result)
+    _writing_as_parquet(clustered_df, honey_paths.clustered_for_command_result.with_suffix(".parquet"))
+    _writing_as_csv(clustered_df, honey_paths.clustered_for_command_result.with_suffix(".csv"))
 
 def _feature_clustering_behavior(df: pd.DataFrame, honey_paths: HoneyClusterPaths):
     clustered_df = _feature_clustering(df, BEHAVIORAL_FEATURES, 'behavioral', honey_paths)
-    _writing_as_parquet(clustered_df, honey_paths.clustered_for_behavior_result)
+    _writing_as_parquet(clustered_df, honey_paths.clustered_for_behavior_result.with_suffix(".parquet"))
+    _writing_as_csv(clustered_df, honey_paths.clustered_for_behavior_result.with_suffix(".csv"))
 
 def _feature_clustering(dataset: pd.DataFrame, features: list, label_name: str, honey_paths: HoneyClusterPaths):
     if dataset.empty:
@@ -238,8 +243,23 @@ def _writing_as_parquet(clustered_data: pd.DataFrame, output_path: Path):
         clustered_data = pd.DataFrame(clustered_data)
     clustered_data.to_parquet(output_path)
 
+def _writing_as_csv(clustered_data: pd.DataFrame, output_path: Path):
+    """
+    Scrive il DataFrame come CSV.
+    Se il file esiste, accoda senza riscrivere l'header.
+    """
+    if isinstance(clustered_data, np.ndarray):
+        clustered_data = pd.DataFrame(clustered_data)
 
+    output_path = output_path.with_suffix(".csv")
+    write_header = not output_path.exists()
 
+    clustered_data.to_csv(
+        output_path,
+        mode='a',
+        header=write_header,
+        index=False
+    )
 
 
 if __name__ == "__main__":

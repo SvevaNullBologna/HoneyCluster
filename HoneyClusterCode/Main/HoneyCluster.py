@@ -39,13 +39,13 @@ class HoneyClusterPaths:
         self.clustering_results_folder = Path(self.artifacts_folder,"clustering_results")
         self.clustering_results_folder.mkdir(parents=True, exist_ok=True)
         # COMPLETE CLUSTERING
-        self.clustered_result = Path(self.clustering_results_folder,"clustered_result.parquet")
+        self.clustered_result = Path(self.clustering_results_folder,"clustered_result")
         # BOTS VS EXPERTS
-        self.clustered_for_expertise_result = Path(self.clustering_results_folder,"clustered_for_expertise_result.parquet")
+        self.clustered_for_expertise_result = Path(self.clustering_results_folder,"clustered_for_expertise_result")
         # FEATURES CLUSTERING
-        self.clustered_for_time_result = Path(self.clustering_results_folder,"clustered_for_features_result.parquet")
-        self.clustered_for_command_result = Path(self.clustering_results_folder,"clustered_for_command_result.parquet")
-        self.clustered_for_behavior_result = Path(self.clustering_results_folder, "clustered_for_behavior_result.parquet")
+        self.clustered_for_time_result = Path(self.clustering_results_folder,"clustered_for_temporal_result")
+        self.clustered_for_command_result = Path(self.clustering_results_folder,"clustered_for_command_result")
+        self.clustered_for_behavior_result = Path(self.clustering_results_folder, "clustered_for_behavior_result")
 
         """
             CLUSTERING -> ANALYSIS 
