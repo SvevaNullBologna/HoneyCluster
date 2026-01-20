@@ -143,7 +143,7 @@ def _feature_clustering(dataset: pd.DataFrame, features: list, label_name: str, 
     model_feature_path = honey_paths.models_folder.joinpath(label_name + ".joblib")
     model = _get_model(model_feature_path)
 
-    labels = _creating_clusters(scaled_feature_dataset, model_feature_path, model, n_clusters = 2)
+    labels = _creating_clusters(scaled_feature_dataset, model_feature_path, model, n_clusters = 3)
 
     dataset[f'cluster_{label_name.strip()}_id'] = labels
 

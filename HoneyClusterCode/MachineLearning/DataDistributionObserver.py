@@ -193,4 +193,4 @@ def _get_resulting_analysis_datas(df: pd.DataFrame):
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     honey_paths = HoneyClusterPaths(Path("C:\\Users\\Sveva\\Documents\\GitHub\\zenodo_dataset"))
-    analizing(honey_paths)
+    analizing(honey_paths, True)
